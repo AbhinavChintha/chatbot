@@ -12,6 +12,7 @@ import com.abhinav.agentic_ai_chatbot.tool.RagTool;
 import com.abhinav.agentic_ai_chatbot.tool.WebSearchTool;
 import org.springframework.stereotype.Service;
 
+import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -39,6 +40,17 @@ public class SupervisorService {
     public ChatResponse execute(
             SupervisorDecision decision,
             String originalMessage) {
+
+        if (decision == null) {
+
+            return new ChatResponse(
+                    "Unable to determine the request type.",
+                    "Supervisor Agent",
+                    "UNKNOWN",
+                    false,
+                    null
+            );
+        }
 
         String intent = decision.getIntent();
 
@@ -102,6 +114,11 @@ public class SupervisorService {
         List<String> requestedFields =
                 decision.getRequestedFields();
 
+        /*
+         * Validate requested fields before querying the database.
+         *
+         * These are the only employee fields currently supported.
+         */
         if (requestedFields != null
                 && !requestedFields.isEmpty()) {
 
@@ -146,11 +163,20 @@ public class SupervisorService {
             }
         }
 
-        ToolResult databaseResult;
+        ToolResult result;
 
+        /*
+         * Priority:
+         *
+         * 1. Employee ID
+         * 2. Employee name
+         * 3. Department
+         * 4. Location
+         * 5. Role
+         */
         if (decision.getEmployeeId() != null) {
 
-            databaseResult =
+            result =
                     databaseTool.getEmployeeDetails(
                             decision.getEmployeeId()
                     );
@@ -158,7 +184,7 @@ public class SupervisorService {
         } else if (decision.getEmployeeName() != null
                 && !decision.getEmployeeName().isBlank()) {
 
-            databaseResult =
+            result =
                     databaseTool.getEmployeeDetailsByName(
                             decision.getEmployeeName()
                     );
@@ -166,7 +192,7 @@ public class SupervisorService {
         } else if (decision.getDepartment() != null
                 && !decision.getDepartment().isBlank()) {
 
-            databaseResult =
+            result =
                     databaseTool.getEmployeesByDepartment(
                             decision.getDepartment()
                     );
@@ -174,7 +200,7 @@ public class SupervisorService {
         } else if (decision.getLocation() != null
                 && !decision.getLocation().isBlank()) {
 
-            databaseResult =
+            result =
                     databaseTool.getEmployeesByLocation(
                             decision.getLocation()
                     );
@@ -182,7 +208,7 @@ public class SupervisorService {
         } else if (decision.getRole() != null
                 && !decision.getRole().isBlank()) {
 
-            databaseResult =
+            result =
                     databaseTool.getEmployeesByRole(
                             decision.getRole()
                     );
@@ -190,7 +216,7 @@ public class SupervisorService {
         } else {
 
             return new ChatResponse(
-                    "No matching employee information was found in the database.",
+                    "No valid employee search criteria were provided.",
                     "Employee Database",
                     "DATABASE",
                     false,
@@ -198,57 +224,81 @@ public class SupervisorService {
             );
         }
 
-        Object data = databaseResult.getData();
+        if (result == null) {
 
-        if (data instanceof Employee employee) {
-
-            String answer = """
-                    Employee Details:
-
-                    ID: %s
-                    Name: %s
-                    Department: %s
-                    Role: %s
-                    Email: %s
-                    Location: %s
-                    """.formatted(
-                    employee.getId(),
-                    employee.getName(),
-                    employee.getDepartment(),
-                    employee.getRole(),
-                    employee.getEmail(),
-                    employee.getLocation()
+            return new ChatResponse(
+                    "The database tool did not return a result.",
+                    "Employee Database",
+                    "DATABASE",
+                    false,
+                    null
             );
+        }
+
+        /*
+         * Handle database failure.
+         */
+        if (!result.isSuccess()) {
+
+            return new ChatResponse(
+                    result.getAnswer(),
+                    "Employee Database",
+                    "DATABASE",
+                    false,
+                    result.getData()
+            );
+        }
+
+        /*
+         * Single employee response.
+         */
+        if (result.getData() instanceof Employee employee) {
+
+            String answer =
+                    buildEmployeeAnswer(
+                            employee,
+                            requestedFields
+                    );
 
             return new ChatResponse(
                     answer,
                     "Employee Database",
                     "DATABASE",
-                    databaseResult.isSuccess(),
+                    true,
                     employee
             );
         }
 
-        if (data instanceof List<?> list) {
+        /*
+         * Multiple employees response.
+         */
+        if (result.getData() instanceof List<?> list) {
 
             List<Employee> employees =
-                    extractEmployees(list);
+                    new ArrayList<>();
+
+            for (Object item : list) {
+
+                if (item instanceof Employee employee) {
+                    employees.add(employee);
+                }
+            }
 
             return new ChatResponse(
                     formatEmployees(employees),
                     "Employee Database",
                     "DATABASE",
-                    databaseResult.isSuccess(),
+                    true,
                     employees
             );
         }
 
         return new ChatResponse(
-                databaseResult.getAnswer(),
+                result.getAnswer(),
                 "Employee Database",
                 "DATABASE",
-                databaseResult.isSuccess(),
-                data
+                true,
+                result.getData()
         );
     }
 
@@ -260,13 +310,34 @@ public class SupervisorService {
             SupervisorDecision decision,
             String originalMessage) {
 
-        ToolResult ragResult =
-                ragTool.search(originalMessage);
+        String query =
+                getToolQuery(
+                        decision.getToolQueries(),
+                        "RAG",
+                        originalMessage
+                );
+
+        System.out.println(
+                "RAG tool query: "
+                        + query
+        );
+
+        ToolResult result =
+                ragTool.search(query);
+
+        if (result == null) {
+
+            return new ChatResponse(
+                    "RAG tool did not return a result.",
+                    "Company Documents",
+                    "RAG",
+                    false,
+                    null
+            );
+        }
 
         List<String> sources =
-                extractSources(
-                        ragResult.getData()
-                );
+                extractSources(result.getData());
 
         RagData ragData =
                 new RagData(sources);
@@ -274,13 +345,17 @@ public class SupervisorService {
         String source =
                 sources.isEmpty()
                         ? "Company Documents"
-                        : String.join(", ", sources);
+                        : "Company Documents, "
+                        + String.join(
+                        ", ",
+                        sources
+                );
 
         return new ChatResponse(
-                ragResult.getAnswer(),
+                result.getAnswer(),
                 source,
                 "RAG",
-                ragResult.isSuccess(),
+                result.isSuccess(),
                 ragData
         );
     }
@@ -293,21 +368,44 @@ public class SupervisorService {
             SupervisorDecision decision,
             String originalMessage) {
 
-        ToolResult webResult =
-                webSearchTool.search(originalMessage);
+        String query =
+                getToolQuery(
+                        decision.getToolQueries(),
+                        "WEB_SEARCH",
+                        originalMessage
+                );
+
+        System.out.println(
+                "WEB_SEARCH tool query: "
+                        + query
+        );
+
+        ToolResult result =
+                webSearchTool.search(query);
+
+        if (result == null) {
+
+            return new ChatResponse(
+                    "Web search did not return a result.",
+                    "Web Search",
+                    "WEB_SEARCH",
+                    false,
+                    null
+            );
+        }
 
         WebSearchData webSearchData =
                 new WebSearchData(
                         extractWebResults(
-                                webResult.getData()
+                                result.getData()
                         )
                 );
 
         return new ChatResponse(
-                webResult.getAnswer(),
+                result.getAnswer(),
                 "Web Search",
                 "WEB_SEARCH",
-                webResult.isSuccess(),
+                result.isSuccess(),
                 webSearchData
         );
     }
@@ -320,7 +418,9 @@ public class SupervisorService {
             String originalMessage) {
 
         String answer =
-                chatService.chat(originalMessage);
+                chatService.chat(
+                        originalMessage
+                );
 
         return new ChatResponse(
                 answer,
@@ -342,9 +442,6 @@ public class SupervisorService {
         List<String> requiredTools =
                 decision.getRequiredTools();
 
-        Map<String, String> toolQueries =
-                decision.getToolQueries();
-
         if (requiredTools == null
                 || requiredTools.isEmpty()) {
 
@@ -357,389 +454,63 @@ public class SupervisorService {
             );
         }
 
-        // =====================================================
-        // DATABASE + RAG + WEB SEARCH
-        // =====================================================
-
+        /*
+         * DATABASE + RAG + WEB SEARCH
+         *
+         * This must be checked first because it contains
+         * all three tools.
+         */
         if (requiredTools.contains("DATABASE")
                 && requiredTools.contains("RAG")
                 && requiredTools.contains("WEB_SEARCH")) {
 
-            ToolResult databaseResult =
-                    getDatabaseResult(decision);
-
-            ToolResult ragResult =
-                    ragTool.search(
-                            getToolQuery(
-                                    toolQueries,
-                                    "RAG",
-                                    originalMessage
-                            )
-                    );
-
-            ToolResult webResult =
-                    webSearchTool.search(
-                            getToolQuery(
-                                    toolQueries,
-                                    "WEB_SEARCH",
-                                    originalMessage
-                            )
-                    );
-
-            Employee employee =
-                    extractEmployee(
-                            databaseResult.getData()
-                    );
-
-            String databaseContext =
-                    buildDatabaseContext(
-                            databaseResult
-                    );
-
-            String context = """
-                    %s
-
-                    Company document information:
-
-                    %s
-
-                    Current external information:
-
-                    %s
-
-                    Original user question:
-
-                    %s
-
-                    Answer the user's question using the
-                    information provided above.
-
-                    Do not invent information.
-
-                    If the database does not contain a matching employee,
-                    clearly state that.
-
-                    If the company documents do not contain the requested
-                    information, clearly state that.
-
-                    If the web search does not provide enough information,
-                    clearly state that.
-                    """.formatted(
-                    databaseContext,
-                    ragResult.getAnswer(),
-                    webResult.getAnswer(),
+            return executeDatabaseRagWeb(
+                    decision,
                     originalMessage
-            );
-
-            String finalAnswer =
-                    chatService.chat(context);
-
-            Map<String, Object> multiToolData =
-                    new LinkedHashMap<>();
-
-            multiToolData.put(
-                    "database",
-                    employee
-            );
-
-            multiToolData.put(
-                    "rag",
-                    new RagData(
-                            extractSources(
-                                    ragResult.getData()
-                            )
-                    )
-            );
-
-            multiToolData.put(
-                    "webSearch",
-                    new WebSearchData(
-                            extractWebResults(
-                                    webResult.getData()
-                            )
-                    )
-            );
-
-            boolean overallSuccess =
-                    databaseResult.isSuccess()
-                            && ragResult.isSuccess()
-                            && webResult.isSuccess();
-
-            return new ChatResponse(
-                    finalAnswer,
-                    "Employee Database, Company Documents, Web Search",
-                    "MULTI_TOOL",
-                    overallSuccess,
-                    multiToolData
             );
         }
 
-        // =====================================================
-        // DATABASE + RAG
-        // =====================================================
-
+        /*
+         * DATABASE + RAG
+         */
         if (requiredTools.contains("DATABASE")
                 && requiredTools.contains("RAG")) {
 
-            ToolResult databaseResult =
-                    getDatabaseResult(decision);
-
-            ToolResult ragResult =
-                    ragTool.search(
-                            getToolQuery(
-                                    toolQueries,
-                                    "RAG",
-                                    originalMessage
-                            )
-                    );
-
-            String databaseContext =
-                    buildDatabaseContext(
-                            databaseResult
-                    );
-
-            String context = """
-                    %s
-
-                    Company document information:
-
-                    %s
-
-                    Original user question:
-
-                    %s
-
-                    Answer the user's question using the employee
-                    information and company document information above.
-
-                    Do not invent information.
-
-                    If the employee was not found in the database,
-                    clearly state that.
-
-                    If the company documents do not contain the requested
-                    information, clearly state that.
-                    """.formatted(
-                    databaseContext,
-                    ragResult.getAnswer(),
+            return executeDatabaseRag(
+                    decision,
                     originalMessage
-            );
-
-            String finalAnswer =
-                    chatService.chat(context);
-
-            Map<String, Object> multiToolData =
-                    new LinkedHashMap<>();
-
-            multiToolData.put(
-                    "database",
-                    extractEmployee(
-                            databaseResult.getData()
-                    )
-            );
-
-            multiToolData.put(
-                    "rag",
-                    new RagData(
-                            extractSources(
-                                    ragResult.getData()
-                            )
-                    )
-            );
-
-            boolean overallSuccess =
-                    databaseResult.isSuccess()
-                            && ragResult.isSuccess();
-
-            return new ChatResponse(
-                    finalAnswer,
-                    "Employee Database, Company Documents",
-                    "MULTI_TOOL",
-                    overallSuccess,
-                    multiToolData
             );
         }
 
-        // =====================================================
-        // DATABASE + WEB SEARCH
-        // =====================================================
-
+        /*
+         * DATABASE + WEB SEARCH
+         */
         if (requiredTools.contains("DATABASE")
                 && requiredTools.contains("WEB_SEARCH")) {
 
-            ToolResult databaseResult =
-                    getDatabaseResult(decision);
-
-            ToolResult webResult =
-                    webSearchTool.search(
-                            getToolQuery(
-                                    toolQueries,
-                                    "WEB_SEARCH",
-                                    originalMessage
-                            )
-                    );
-
-            String databaseContext =
-                    buildDatabaseContext(
-                            databaseResult
-                    );
-
-            String context = """
-                    %s
-
-                    Current external information:
-
-                    %s
-
-                    Original user question:
-
-                    %s
-
-                    Answer the user's question using the
-                    employee information and current external
-                    information above.
-
-                    Do not invent information.
-
-                    If the employee was not found in the database,
-                    clearly state that.
-
-                    If the web search does not provide enough information,
-                    clearly state that.
-                    """.formatted(
-                    databaseContext,
-                    webResult.getAnswer(),
+            return executeDatabaseWeb(
+                    decision,
                     originalMessage
-            );
-
-            String finalAnswer =
-                    chatService.chat(context);
-
-            Map<String, Object> multiToolData =
-                    new LinkedHashMap<>();
-
-            multiToolData.put(
-                    "database",
-                    extractEmployee(
-                            databaseResult.getData()
-                    )
-            );
-
-            multiToolData.put(
-                    "webSearch",
-                    new WebSearchData(
-                            extractWebResults(
-                                    webResult.getData()
-                            )
-                    )
-            );
-
-            boolean overallSuccess =
-                    databaseResult.isSuccess()
-                            && webResult.isSuccess();
-
-            return new ChatResponse(
-                    finalAnswer,
-                    "Employee Database, Web Search",
-                    "MULTI_TOOL",
-                    overallSuccess,
-                    multiToolData
             );
         }
 
-        // =====================================================
-        // RAG + WEB SEARCH
-        // =====================================================
-
+        /*
+         * RAG + WEB SEARCH
+         */
         if (requiredTools.contains("RAG")
                 && requiredTools.contains("WEB_SEARCH")) {
 
-            ToolResult ragResult =
-                    ragTool.search(
-                            getToolQuery(
-                                    toolQueries,
-                                    "RAG",
-                                    originalMessage
-                            )
-                    );
-
-            ToolResult webResult =
-                    webSearchTool.search(
-                            getToolQuery(
-                                    toolQueries,
-                                    "WEB_SEARCH",
-                                    originalMessage
-                            )
-                    );
-
-            String context = """
-                    Company document information:
-
-                    %s
-
-                    Current external information:
-
-                    %s
-
-                    Original user question:
-
-                    %s
-
-                    Answer the user's question using the
-                    information provided above.
-
-                    Do not invent information.
-
-                    If the company documents do not contain the requested
-                    information, clearly state that.
-
-                    If the web search does not provide enough information,
-                    clearly state that.
-                    """.formatted(
-                    ragResult.getAnswer(),
-                    webResult.getAnswer(),
+            return executeRagWeb(
+                    decision,
                     originalMessage
-            );
-
-            String finalAnswer =
-                    chatService.chat(context);
-
-            Map<String, Object> multiToolData =
-                    new LinkedHashMap<>();
-
-            multiToolData.put(
-                    "rag",
-                    new RagData(
-                            extractSources(
-                                    ragResult.getData()
-                            )
-                    )
-            );
-
-            multiToolData.put(
-                    "webSearch",
-                    new WebSearchData(
-                            extractWebResults(
-                                    webResult.getData()
-                            )
-                    )
-            );
-
-            boolean overallSuccess =
-                    ragResult.isSuccess()
-                            && webResult.isSuccess();
-
-            return new ChatResponse(
-                    finalAnswer,
-                    "Company Documents, Web Search",
-                    "MULTI_TOOL",
-                    overallSuccess,
-                    multiToolData
             );
         }
 
+        /*
+         * Fallback.
+         */
         return new ChatResponse(
-                "The requested combination of tools is not currently supported.",
+                "The requested combination of tools is not supported.",
                 "Supervisor Agent",
                 "MULTI_TOOL",
                 false,
@@ -748,11 +519,677 @@ public class SupervisorService {
     }
 
     // =========================================================
-    // DATABASE RESULT
+    // DATABASE + RAG
     // =========================================================
 
-    private ToolResult getDatabaseResult(
+    private ChatResponse executeDatabaseRag(
+            SupervisorDecision decision,
+            String originalMessage) {
+
+        ToolResult databaseResult =
+                executeDatabaseTool(decision);
+
+        String databaseContext;
+
+        Employee employee =
+                extractEmployee(
+                        databaseResult
+                );
+
+        List<Employee> employees =
+                extractEmployees(
+                        databaseResult
+                );
+
+        boolean databaseSuccess =
+                databaseResult != null
+                        && databaseResult.isSuccess();
+
+        if (employee != null) {
+
+            databaseContext =
+                    buildEmployeeContext(
+                            employee
+                    );
+
+        } else if (!employees.isEmpty()) {
+
+            databaseContext =
+                    buildEmployeesContext(
+                            employees
+                    );
+
+        } else {
+
+            databaseContext =
+                    "No matching employee information was found in the database.";
+        }
+
+        String ragQuery =
+                getToolQuery(
+                        decision.getToolQueries(),
+                        "RAG",
+                        originalMessage
+                );
+
+        System.out.println(
+                "RAG tool query: "
+                        + ragQuery
+        );
+
+        ToolResult ragResult =
+                ragTool.search(ragQuery);
+
+        boolean ragSuccess =
+                ragResult != null
+                        && ragResult.isSuccess();
+
+        String ragAnswer =
+                ragResult == null
+                        ? "RAG tool did not return a result."
+                        : ragResult.getAnswer();
+
+        String context = """
+                Employee Database Information:
+
+                %s
+
+                Company Document Information:
+
+                %s
+
+                Original User Question:
+
+                %s
+
+                Answer the user's question using the information above.
+
+                Do not invent information.
+
+                If employee information was not found,
+                clearly state that.
+
+                If company documents do not provide enough
+                information, clearly state that.
+                """.formatted(
+                databaseContext,
+                ragAnswer,
+                originalMessage
+        );
+
+        String finalAnswer =
+                chatService.chat(context);
+
+        List<String> sources =
+                extractSources(
+                        ragResult == null
+                                ? null
+                                : ragResult.getData()
+                );
+
+        String source =
+                sources.isEmpty()
+                        ? "Employee Database, Company Documents"
+                        : "Employee Database, Company Documents, "
+                        + String.join(
+                        ", ",
+                        sources
+                );
+
+        Map<String, Object> multiToolData =
+                new LinkedHashMap<>();
+
+        multiToolData.put(
+                "database",
+                employee != null
+                        ? employee
+                        : employees
+        );
+
+        multiToolData.put(
+                "rag",
+                new RagData(sources)
+        );
+
+        boolean overallSuccess =
+                databaseSuccess
+                        && ragSuccess;
+
+        return new ChatResponse(
+                finalAnswer,
+                source,
+                "MULTI_TOOL",
+                overallSuccess,
+                multiToolData
+        );
+    }
+
+    // =========================================================
+    // DATABASE + WEB SEARCH
+    // =========================================================
+
+    private ChatResponse executeDatabaseWeb(
+            SupervisorDecision decision,
+            String originalMessage) {
+
+        ToolResult databaseResult =
+                executeDatabaseTool(decision);
+
+        Employee employee =
+                extractEmployee(
+                        databaseResult
+                );
+
+        List<Employee> employees =
+                extractEmployees(
+                        databaseResult
+                );
+
+        boolean databaseSuccess =
+                databaseResult != null
+                        && databaseResult.isSuccess();
+
+        String databaseContext;
+
+        if (employee != null) {
+
+            databaseContext =
+                    buildEmployeeContext(
+                            employee
+                    );
+
+        } else if (!employees.isEmpty()) {
+
+            databaseContext =
+                    buildEmployeesContext(
+                            employees
+                    );
+
+        } else {
+
+            databaseContext =
+                    "No matching employee information was found in the database.";
+        }
+
+        String webQuery =
+                getToolQuery(
+                        decision.getToolQueries(),
+                        "WEB_SEARCH",
+                        originalMessage
+                );
+
+        System.out.println(
+                "WEB_SEARCH tool query: "
+                        + webQuery
+        );
+
+        ToolResult webResult =
+                webSearchTool.search(webQuery);
+
+        boolean webSuccess =
+                webResult != null
+                        && webResult.isSuccess();
+
+        String webAnswer =
+                webResult == null
+                        ? "Web search did not return a result."
+                        : webResult.getAnswer();
+
+        String context = """
+                Employee Database Information:
+
+                %s
+
+                Current External Information:
+
+                %s
+
+                Original User Question:
+
+                %s
+
+                Answer the user's question using the
+                employee information and current external
+                information above.
+
+                Do not invent information.
+
+                If the employee was not found in the database,
+                clearly state that.
+
+                If the web search does not provide enough
+                information, clearly state that.
+                """.formatted(
+                databaseContext,
+                webAnswer,
+                originalMessage
+        );
+
+        String finalAnswer =
+                chatService.chat(context);
+
+        WebSearchData webSearchData =
+                new WebSearchData(
+                        extractWebResults(
+                                webResult == null
+                                        ? null
+                                        : webResult.getData()
+                        )
+                );
+
+        Map<String, Object> multiToolData =
+                new LinkedHashMap<>();
+
+        multiToolData.put(
+                "database",
+                employee != null
+                        ? employee
+                        : employees
+        );
+
+        multiToolData.put(
+                "webSearch",
+                webSearchData
+        );
+
+        boolean overallSuccess =
+                databaseSuccess
+                        && webSuccess;
+
+        return new ChatResponse(
+                finalAnswer,
+                "Employee Database, Web Search",
+                "MULTI_TOOL",
+                overallSuccess,
+                multiToolData
+        );
+    }
+
+    // =========================================================
+    // RAG + WEB SEARCH
+    // =========================================================
+
+    private ChatResponse executeRagWeb(
+            SupervisorDecision decision,
+            String originalMessage) {
+
+        String ragQuery =
+                getToolQuery(
+                        decision.getToolQueries(),
+                        "RAG",
+                        originalMessage
+                );
+
+        String webQuery =
+                getToolQuery(
+                        decision.getToolQueries(),
+                        "WEB_SEARCH",
+                        originalMessage
+                );
+
+        System.out.println(
+                "RAG tool query: "
+                        + ragQuery
+        );
+
+        System.out.println(
+                "WEB_SEARCH tool query: "
+                        + webQuery
+        );
+
+        ToolResult ragResult =
+                ragTool.search(ragQuery);
+
+        ToolResult webResult =
+                webSearchTool.search(webQuery);
+
+        boolean ragSuccess =
+                ragResult != null
+                        && ragResult.isSuccess();
+
+        boolean webSuccess =
+                webResult != null
+                        && webResult.isSuccess();
+
+        String ragAnswer =
+                ragResult == null
+                        ? "RAG tool did not return a result."
+                        : ragResult.getAnswer();
+
+        String webAnswer =
+                webResult == null
+                        ? "Web search did not return a result."
+                        : webResult.getAnswer();
+
+        String context = """
+                Company Document Information:
+
+                %s
+
+                Current External Information:
+
+                %s
+
+                Original User Question:
+
+                %s
+
+                Answer the user's question using the
+                information provided above.
+
+                Do not invent information.
+
+                If the company documents do not provide
+                enough information, clearly state that.
+
+                If the web search does not provide enough
+                information, clearly state that.
+                """.formatted(
+                ragAnswer,
+                webAnswer,
+                originalMessage
+        );
+
+        String finalAnswer =
+                chatService.chat(context);
+
+        List<String> ragSources =
+                extractSources(
+                        ragResult == null
+                                ? null
+                                : ragResult.getData()
+                );
+
+        WebSearchData webSearchData =
+                new WebSearchData(
+                        extractWebResults(
+                                webResult == null
+                                        ? null
+                                        : webResult.getData()
+                        )
+                );
+
+        Map<String, Object> multiToolData =
+                new LinkedHashMap<>();
+
+        multiToolData.put(
+                "rag",
+                new RagData(ragSources)
+        );
+
+        multiToolData.put(
+                "webSearch",
+                webSearchData
+        );
+
+        boolean overallSuccess =
+                ragSuccess
+                        && webSuccess;
+
+        return new ChatResponse(
+                finalAnswer,
+                "Company Documents, Web Search",
+                "MULTI_TOOL",
+                overallSuccess,
+                multiToolData
+        );
+    }
+
+    // =========================================================
+    // DATABASE + RAG + WEB SEARCH
+    // =========================================================
+
+    private ChatResponse executeDatabaseRagWeb(
+            SupervisorDecision decision,
+            String originalMessage) {
+
+        ToolResult databaseResult =
+                executeDatabaseTool(decision);
+
+        Employee employee =
+                extractEmployee(
+                        databaseResult
+                );
+
+        List<Employee> employees =
+                extractEmployees(
+                        databaseResult
+                );
+
+        boolean databaseSuccess =
+                databaseResult != null
+                        && databaseResult.isSuccess();
+
+        String databaseContext;
+
+        if (employee != null) {
+
+            databaseContext =
+                    buildEmployeeContext(
+                            employee
+                    );
+
+        } else if (!employees.isEmpty()) {
+
+            databaseContext =
+                    buildEmployeesContext(
+                            employees
+                    );
+
+        } else {
+
+            databaseContext =
+                    "No matching employee information was found in the database.";
+        }
+
+        String ragQuery =
+                getToolQuery(
+                        decision.getToolQueries(),
+                        "RAG",
+                        originalMessage
+                );
+
+        String webQuery =
+                getToolQuery(
+                        decision.getToolQueries(),
+                        "WEB_SEARCH",
+                        originalMessage
+                );
+
+        System.out.println(
+                "RAG tool query: "
+                        + ragQuery
+        );
+
+        System.out.println(
+                "WEB_SEARCH tool query: "
+                        + webQuery
+        );
+
+        ToolResult ragResult =
+                ragTool.search(ragQuery);
+
+        ToolResult webResult =
+                webSearchTool.search(webQuery);
+
+        boolean ragSuccess =
+                ragResult != null
+                        && ragResult.isSuccess();
+
+        boolean webSuccess =
+                webResult != null
+                        && webResult.isSuccess();
+
+        String ragAnswer =
+                ragResult == null
+                        ? "RAG tool did not return a result."
+                        : ragResult.getAnswer();
+
+        String webAnswer =
+                webResult == null
+                        ? "Web search did not return a result."
+                        : webResult.getAnswer();
+
+        String context = """
+                Employee Database Information:
+
+                %s
+
+                Company Document Information:
+
+                %s
+
+                Current External Information:
+
+                %s
+
+                Original User Question:
+
+                %s
+
+                Answer the user's question using the
+                information provided above.
+
+                Do not invent information.
+
+                If employee information was not found,
+                clearly state that.
+
+                If company documents do not provide enough
+                information, clearly state that.
+
+                If web search does not provide enough
+                information, clearly state that.
+                """.formatted(
+                databaseContext,
+                ragAnswer,
+                webAnswer,
+                originalMessage
+        );
+
+        String finalAnswer =
+                chatService.chat(context);
+
+        List<String> ragSources =
+                extractSources(
+                        ragResult == null
+                                ? null
+                                : ragResult.getData()
+                );
+
+        WebSearchData webSearchData =
+                new WebSearchData(
+                        extractWebResults(
+                                webResult == null
+                                        ? null
+                                        : webResult.getData()
+                        )
+                );
+
+        Map<String, Object> multiToolData =
+                new LinkedHashMap<>();
+
+        multiToolData.put(
+                "database",
+                employee != null
+                        ? employee
+                        : employees
+        );
+
+        multiToolData.put(
+                "rag",
+                new RagData(ragSources)
+        );
+
+        multiToolData.put(
+                "webSearch",
+                webSearchData
+        );
+
+        boolean overallSuccess =
+                databaseSuccess
+                        && ragSuccess
+                        && webSuccess;
+
+        return new ChatResponse(
+                finalAnswer,
+                "Employee Database, Company Documents, Web Search",
+                "MULTI_TOOL",
+                overallSuccess,
+                multiToolData
+        );
+    }
+
+    // =========================================================
+    // DATABASE TOOL EXECUTION
+    // =========================================================
+
+    private ToolResult executeDatabaseTool(
             SupervisorDecision decision) {
+
+        List<String> requestedFields =
+                decision.getRequestedFields();
+
+        /*
+         * Security validation:
+         * never allow the LLM to retrieve fields that are
+         * not part of the Employee database.
+         */
+        if (requestedFields != null
+                && !requestedFields.isEmpty()) {
+
+            List<String> supportedFields = List.of(
+                    "id",
+                    "employeeid",
+                    "name",
+                    "employeename",
+                    "department",
+                    "role",
+                    "email",
+                    "location"
+            );
+
+            List<String> unsupportedFields =
+                    requestedFields.stream()
+                            .filter(field ->
+                                    field != null
+                                            && !supportedFields.contains(
+                                            field.trim().toLowerCase()
+                                    )
+                            )
+                            .toList();
+
+            if (!unsupportedFields.isEmpty()) {
+
+                return new ToolResult(
+                        "DATABASE",
+                        false,
+                        "The requested information ("
+                                + String.join(
+                                ", ",
+                                unsupportedFields
+                        )
+                                + ") is not available in the employee database.",
+                        null
+                );
+            }
+        }
+
+        /*
+         * IMPORTANT:
+         *
+         * We intentionally DO NOT execute the SQL contained
+         * inside toolQueries.
+         *
+         * The LLM may return:
+         *
+         * "DATABASE": "SELECT role FROM employees WHERE id = 101"
+         *
+         * but that SQL is treated only as metadata.
+         *
+         * Actual database access is performed through the
+         * controlled DatabaseTool methods below.
+         */
 
         if (decision.getEmployeeId() != null) {
 
@@ -796,58 +1233,177 @@ public class SupervisorService {
         return new ToolResult(
                 "DATABASE",
                 false,
-                "No database lookup criteria were provided.",
+                "No valid employee search criteria were provided.",
                 null
         );
     }
 
     // =========================================================
-    // DATABASE CONTEXT
+    // TOOL QUERY HELPER
     // =========================================================
 
-    private String buildDatabaseContext(
-            ToolResult databaseResult) {
+    private String getToolQuery(
+            Map<String, Object> toolQueries,
+            String toolName,
+            String originalMessage) {
 
-        Employee employee =
-                extractEmployee(
-                        databaseResult.getData()
-                );
+        if (toolQueries == null
+                || toolQueries.isEmpty()) {
 
-        if (employee != null) {
-
-            return """
-                    Employee information:
-
-                    ID: %s
-                    Name: %s
-                    Department: %s
-                    Role: %s
-                    Email: %s
-                    Location: %s
-                    """.formatted(
-                    employee.getId(),
-                    employee.getName(),
-                    employee.getDepartment(),
-                    employee.getRole(),
-                    employee.getEmail(),
-                    employee.getLocation()
-            );
+            return originalMessage;
         }
 
-        List<Employee> employees =
-                extractEmployees(
-                        databaseResult.getData()
-                );
+        Object rawToolQuery =
+                toolQueries.get(toolName);
 
-        if (!employees.isEmpty()) {
-            return formatEmployees(employees);
+        if (rawToolQuery == null) {
+
+            return originalMessage;
         }
 
-        return """
-                Employee information:
+        /*
+         * CASE 1:
+         *
+         * The LLM returned a plain string.
+         *
+         * Example:
+         *
+         * "RAG": "annual leave entitlement"
+         *
+         * or:
+         *
+         * "WEB_SEARCH": "latest Java news"
+         *
+         * For DATABASE, the string may contain SQL.
+         * We NEVER execute that SQL.
+         */
+        if (rawToolQuery instanceof String stringQuery) {
 
-                No matching employee information was found in the database.
-                """;
+            if (stringQuery.isBlank()) {
+                return originalMessage;
+            }
+
+            /*
+             * DATABASE SQL is never executed.
+             *
+             * Return the original user message instead.
+             */
+            if ("DATABASE".equalsIgnoreCase(toolName)) {
+
+                return originalMessage;
+            }
+
+            return stringQuery.trim();
+        }
+
+        /*
+         * CASE 2:
+         *
+         * The LLM returned a structured JSON object.
+         *
+         * Example:
+         *
+         * {
+         *     "entity": "EMPLOYEE",
+         *     "filters": {
+         *         "id": 101
+         *     },
+         *     "fields": ["role"]
+         * }
+         *
+         * Jackson represents this as a Map.
+         */
+        if (rawToolQuery instanceof Map<?, ?> map) {
+
+            StringBuilder query =
+                    new StringBuilder();
+
+            Object entity =
+                    map.get("entity");
+
+            if (entity != null
+                    && !String.valueOf(entity).isBlank()) {
+
+                query.append(
+                        String.valueOf(entity)
+                );
+            }
+
+            Object filters =
+                    map.get("filters");
+
+            if (filters instanceof Map<?, ?> filterMap) {
+
+                for (Map.Entry<?, ?> entry
+                        : filterMap.entrySet()) {
+
+                    if (!query.isEmpty()) {
+                        query.append(" ");
+                    }
+
+                    query.append(
+                            String.valueOf(
+                                    entry.getKey()
+                            )
+                    );
+
+                    query.append(" ");
+
+                    query.append(
+                            String.valueOf(
+                                    entry.getValue()
+                            )
+                    );
+                }
+            }
+
+            Object fields =
+                    map.get("fields");
+
+            if (fields instanceof List<?> fieldList
+                    && !fieldList.isEmpty()) {
+
+                if (!query.isEmpty()) {
+                    query.append(" ");
+                }
+
+                boolean firstField = true;
+
+                for (Object field : fieldList) {
+
+                    if (field == null) {
+                        continue;
+                    }
+
+                    if (!firstField) {
+                        query.append(" ");
+                    }
+
+                    query.append(
+                            String.valueOf(field)
+                    );
+
+                    firstField = false;
+                }
+            }
+
+            String finalQuery =
+                    query.toString().trim();
+
+            if (!finalQuery.isBlank()) {
+
+                return finalQuery;
+            }
+        }
+
+        /*
+         * CASE 3:
+         *
+         * Unexpected structure.
+         *
+         * Safely fall back to the original user message.
+         */
+        return originalMessage;
     }
 
     // =========================================================
@@ -855,9 +1411,15 @@ public class SupervisorService {
     // =========================================================
 
     private Employee extractEmployee(
-            Object data) {
+            ToolResult result) {
 
-        if (data instanceof Employee employee) {
+        if (result == null
+                || result.getData() == null) {
+
+            return null;
+        }
+
+        if (result.getData() instanceof Employee employee) {
             return employee;
         }
 
@@ -869,85 +1431,239 @@ public class SupervisorService {
     // =========================================================
 
     private List<Employee> extractEmployees(
-            Object data) {
+            ToolResult result) {
 
-        if (!(data instanceof List<?> list)) {
+        if (result == null
+                || result.getData() == null) {
+
             return List.of();
         }
 
-        return list.stream()
-                .filter(item ->
-                        item instanceof Employee
-                )
-                .map(item ->
-                        (Employee) item
-                )
-                .toList();
-    }
+        if (!(result.getData() instanceof List<?> list)) {
 
-    // =========================================================
-    // RAG SOURCE EXTRACTION
-    // =========================================================
-
-    private List<String> extractSources(
-            Object data) {
-
-        if (!(data instanceof List<?> list)) {
             return List.of();
         }
 
-        return list.stream()
-                .filter(item ->
-                        item instanceof String
-                )
-                .map(item ->
-                        (String) item
-                )
-                .toList();
-    }
+        List<Employee> employees =
+                new ArrayList<>();
 
-    // =========================================================
-    // WEB SEARCH RESULT EXTRACTION
-    // =========================================================
+        for (Object item : list) {
 
-    private List<WebSearchResult> extractWebResults(
-            Object data) {
-
-        if (!(data instanceof List<?> list)) {
-            return List.of();
+            if (item instanceof Employee employee) {
+                employees.add(employee);
+            }
         }
 
-        return list.stream()
-                .filter(item ->
-                        item instanceof WebSearchResult
-                )
-                .map(item ->
-                        (WebSearchResult) item
-                )
-                .toList();
+        return employees;
     }
 
     // =========================================================
-    // TOOL QUERY HELPER
+    // EMPLOYEE ANSWER
     // =========================================================
 
-    private String getToolQuery(
-            Map<String, String> toolQueries,
-            String toolName,
-            String originalMessage) {
+    private String buildEmployeeAnswer(
+            Employee employee,
+            List<String> requestedFields) {
 
-        if (toolQueries != null
-                && toolQueries.get(toolName) != null
-                && !toolQueries.get(toolName).isBlank()) {
+        /*
+         * If requestedFields is empty/null, return the normal
+         * complete employee details.
+         */
+        if (requestedFields == null
+                || requestedFields.isEmpty()) {
 
-            return toolQueries.get(toolName);
+            return buildEmployeeContext(
+                    employee
+            );
         }
 
-        return originalMessage;
+        StringBuilder answer =
+                new StringBuilder();
+
+        answer.append(
+                "Employee Details:\n\n"
+        );
+
+        boolean addedField =
+                false;
+
+        for (String field : requestedFields) {
+
+            if (field == null) {
+                continue;
+            }
+
+            switch (
+                    field.trim().toLowerCase()
+            ) {
+
+                case "id":
+                case "employeeid":
+
+                    answer.append(
+                            "ID: "
+                    ).append(
+                            employee.getId()
+                    ).append("\n");
+
+                    addedField = true;
+                    break;
+
+                case "name":
+                case "employeename":
+
+                    answer.append(
+                            "Name: "
+                    ).append(
+                            employee.getName()
+                    ).append("\n");
+
+                    addedField = true;
+                    break;
+
+                case "department":
+
+                    answer.append(
+                            "Department: "
+                    ).append(
+                            employee.getDepartment()
+                    ).append("\n");
+
+                    addedField = true;
+                    break;
+
+                case "role":
+
+                    answer.append(
+                            "Role: "
+                    ).append(
+                            employee.getRole()
+                    ).append("\n");
+
+                    addedField = true;
+                    break;
+
+                case "email":
+
+                    answer.append(
+                            "Email: "
+                    ).append(
+                            employee.getEmail()
+                    ).append("\n");
+
+                    addedField = true;
+                    break;
+
+                case "location":
+
+                    answer.append(
+                            "Location: "
+                    ).append(
+                            employee.getLocation()
+                    ).append("\n");
+
+                    addedField = true;
+                    break;
+
+                default:
+                    break;
+            }
+        }
+
+        if (!addedField) {
+
+            return buildEmployeeContext(
+                    employee
+            );
+        }
+
+        return answer.toString().trim();
     }
 
     // =========================================================
-    // FORMAT EMPLOYEES
+    // EMPLOYEE CONTEXT
+    // =========================================================
+
+    private String buildEmployeeContext(
+            Employee employee) {
+
+        return """
+                ID: %s
+                Name: %s
+                Department: %s
+                Role: %s
+                Email: %s
+                Location: %s
+                """.formatted(
+                employee.getId(),
+                employee.getName(),
+                employee.getDepartment(),
+                employee.getRole(),
+                employee.getEmail(),
+                employee.getLocation()
+        );
+    }
+
+    // =========================================================
+    // EMPLOYEE LIST CONTEXT
+    // =========================================================
+
+    private String buildEmployeesContext(
+            List<Employee> employees) {
+
+        if (employees == null
+                || employees.isEmpty()) {
+
+            return "No employee information was found.";
+        }
+
+        StringBuilder context =
+                new StringBuilder();
+
+        for (Employee employee : employees) {
+
+            context.append(
+                    "ID: "
+            ).append(
+                    employee.getId()
+            ).append("\n");
+
+            context.append(
+                    "Name: "
+            ).append(
+                    employee.getName()
+            ).append("\n");
+
+            context.append(
+                    "Department: "
+            ).append(
+                    employee.getDepartment()
+            ).append("\n");
+
+            context.append(
+                    "Role: "
+            ).append(
+                    employee.getRole()
+            ).append("\n");
+
+            context.append(
+                    "Email: "
+            ).append(
+                    employee.getEmail()
+            ).append("\n");
+
+            context.append(
+                    "Location: "
+            ).append(
+                    employee.getLocation()
+            ).append("\n\n");
+        }
+
+        return context.toString().trim();
+    }
+
+    // =========================================================
+    // EMPLOYEE LIST FORMAT
     // =========================================================
 
     private String formatEmployees(
@@ -956,36 +1672,127 @@ public class SupervisorService {
         if (employees == null
                 || employees.isEmpty()) {
 
-            return "No matching employees were found.";
+            return "No employees were found.";
         }
 
-        StringBuilder result =
+        StringBuilder answer =
                 new StringBuilder(
-                        "Matching Employees:\n\n"
+                        "Employees:\n\n"
                 );
 
         for (Employee employee : employees) {
 
-            result.append(
-                    """
-                    ID: %s
-                    Name: %s
-                    Department: %s
-                    Role: %s
-                    Email: %s
-                    Location: %s
+            answer.append(
+                    "ID: "
+            ).append(
+                    employee.getId()
+            ).append("\n");
 
-                    """.formatted(
-                            employee.getId(),
-                            employee.getName(),
-                            employee.getDepartment(),
-                            employee.getRole(),
-                            employee.getEmail(),
-                            employee.getLocation()
-                    )
+            answer.append(
+                    "Name: "
+            ).append(
+                    employee.getName()
+            ).append("\n");
+
+            answer.append(
+                    "Department: "
+            ).append(
+                    employee.getDepartment()
+            ).append("\n");
+
+            answer.append(
+                    "Role: "
+            ).append(
+                    employee.getRole()
+            ).append("\n");
+
+            answer.append(
+                    "Email: "
+            ).append(
+                    employee.getEmail()
+            ).append("\n");
+
+            answer.append(
+                    "Location: "
+            ).append(
+                    employee.getLocation()
+            ).append("\n");
+
+            answer.append(
+                    "-------------------------\n"
             );
         }
 
-        return result.toString();
+        return answer.toString().trim();
+    }
+
+    // =========================================================
+    // RAG SOURCES
+    // =========================================================
+
+    private List<String> extractSources(
+            Object data) {
+
+        if (data == null) {
+            return List.of();
+        }
+
+        if (data instanceof List<?> list) {
+
+            List<String> sources =
+                    new ArrayList<>();
+
+            for (Object item : list) {
+
+                if (item != null) {
+
+                    sources.add(
+                            String.valueOf(item)
+                    );
+                }
+            }
+
+            return sources;
+        }
+
+        if (data instanceof String value) {
+
+            if (value.isBlank()) {
+                return List.of();
+            }
+
+            return List.of(value);
+        }
+
+        return List.of();
+    }
+
+    // =========================================================
+    // WEB SEARCH RESULTS
+    // =========================================================
+
+    private List<WebSearchResult> extractWebResults(
+            Object data) {
+
+        if (data == null) {
+            return List.of();
+        }
+
+        if (!(data instanceof List<?> list)) {
+            return List.of();
+        }
+
+        List<WebSearchResult> results =
+                new ArrayList<>();
+
+        for (Object item : list) {
+
+            if (item instanceof WebSearchResult result) {
+
+                results.add(result);
+            }
+        }
+
+        return results;
     }
 }

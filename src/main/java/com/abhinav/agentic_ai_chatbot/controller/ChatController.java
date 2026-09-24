@@ -3,17 +3,18 @@ package com.abhinav.agentic_ai_chatbot.controller;
 import com.abhinav.agentic_ai_chatbot.agent.SupervisorAgent;
 import com.abhinav.agentic_ai_chatbot.dto.ChatRequest;
 import com.abhinav.agentic_ai_chatbot.dto.ChatResponse;
+import com.abhinav.agentic_ai_chatbot.service.ConversationService;
 import com.abhinav.agentic_ai_chatbot.validation.ChatRequestValidator;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.media.Content;
 import io.swagger.v3.oas.annotations.media.ExampleObject;
 import io.swagger.v3.oas.annotations.media.Schema;
-import io.swagger.v3.oas.annotations.parameters.RequestBody;
 import io.swagger.v3.oas.annotations.responses.ApiResponse;
 import io.swagger.v3.oas.annotations.responses.ApiResponses;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
@@ -21,108 +22,46 @@ import org.springframework.web.bind.annotation.RestController;
 @RequestMapping("/api/chat")
 @Tag(
         name = "Enterprise Chatbot",
-        description = "Agentic AI chatbot API that routes requests to Database, RAG, Web Search, or General LLM"
+        description = "Agentic AI chatbot that routes requests to Database, RAG, Web Search, or General LLM"
 )
 public class ChatController {
 
     private final SupervisorAgent supervisorAgent;
     private final ChatRequestValidator chatRequestValidator;
+    private final ConversationService conversationService;
 
     public ChatController(
             SupervisorAgent supervisorAgent,
-            ChatRequestValidator chatRequestValidator) {
+            ChatRequestValidator chatRequestValidator,
+            ConversationService conversationService) {
 
         this.supervisorAgent = supervisorAgent;
         this.chatRequestValidator = chatRequestValidator;
+        this.conversationService = conversationService;
     }
 
     @Operation(
-            summary = "Process a chatbot request",
+            summary = "Chat with Enterprise AI Assistant",
             description = """
-                    Accepts a natural-language user request and routes it
-                    through the Supervisor Agent.
+                    Sends a user message to the Agentic AI Supervisor.
 
-                    Supported routes:
+                    The Supervisor dynamically routes the request to:
+                    Database, RAG, Web Search, General LLM,
+                    or multiple tools.
 
-                    DATABASE
-                    Employee information retrieved from MySQL.
-
-                    RAG
-                    Internal company documents and policies.
-
-                    WEB_SEARCH
-                    Current external information from the internet.
-
-                    GENERAL
-                    General-purpose LLM questions.
-                    """,
-            requestBody = @RequestBody(
-                    description = "Natural-language request sent to the chatbot",
-                    required = true,
-                    content = @Content(
-                            mediaType = "application/json",
-                            schema = @Schema(
-                                    implementation = ChatRequest.class
-                            ),
-                            examples = @ExampleObject(
-                                    value = """
-                                            {
-                                              "message": "Show me employee 101"
-                                            }
-                                            """
-                            )
-                    )
-            )
+                    The sessionId is used to maintain conversation history.
+                    """
     )
     @ApiResponses({
 
             @ApiResponse(
                     responseCode = "200",
-                    description = "Request processed successfully",
+                    description = "Chat response generated successfully",
                     content = @Content(
                             mediaType = "application/json",
                             schema = @Schema(
                                     implementation = ChatResponse.class
-                            ),
-                            examples = {
-
-                                    @ExampleObject(
-                                            name = "Database Response",
-                                            value = """
-                                                    {
-                                                      "answer": "Employee details retrieved successfully.",
-                                                      "source": "Employee Database",
-                                                      "type": "DATABASE",
-                                                      "success": true,
-                                                      "data": {
-                                                        "id": 101,
-                                                        "name": "Rahul Sharma",
-                                                        "department": "Engineering",
-                                                        "role": "Java Developer",
-                                                        "email": "rahul@example.com",
-                                                        "location": "Hyderabad"
-                                                      }
-                                                    }
-                                                    """
-                                    ),
-
-                                    @ExampleObject(
-                                            name = "RAG Response",
-                                            value = """
-                                                    {
-                                                      "answer": "Employees are entitled to 20 days of annual leave per calendar year.",
-                                                      "source": "Company Leave Policy",
-                                                      "type": "RAG",
-                                                      "success": true,
-                                                      "data": {
-                                                        "documents": [
-                                                          "leave-policy.txt"
-                                                        ]
-                                                      }
-                                                    }
-                                                    """
-                                    )
-                            }
+                            )
                     )
             ),
 
@@ -131,17 +70,10 @@ public class ChatController {
                     description = "Invalid request",
                     content = @Content(
                             mediaType = "application/json",
-                            schema = @Schema(
-                                    implementation = ChatResponse.class
-                            ),
                             examples = @ExampleObject(
                                     value = """
                                             {
-                                              "answer": "Message cannot be empty.",
-                                              "source": "Chat API",
-                                              "type": "VALIDATION_ERROR",
-                                              "success": false,
-                                              "data": null
+                                              "error": "Session ID cannot be empty."
                                             }
                                             """
                             )
@@ -150,39 +82,60 @@ public class ChatController {
 
             @ApiResponse(
                     responseCode = "500",
-                    description = "Unexpected server error",
-                    content = @Content(
-                            mediaType = "application/json",
-                            schema = @Schema(
-                                    implementation = ChatResponse.class
-                            ),
-                            examples = @ExampleObject(
-                                    value = """
-                                            {
-                                              "answer": "An unexpected error occurred while processing your request.",
-                                              "source": "Chat API",
-                                              "type": "INTERNAL_ERROR",
-                                              "success": false,
-                                              "data": null
-                                            }
-                                            """
-                            )
-                    )
+                    description = "Internal server error"
             )
     })
     @PostMapping
     public ResponseEntity<ChatResponse> chat(
-            @org.springframework.web.bind.annotation.RequestBody(
-                    required = false
-            )
+            @RequestBody(required = false)
             ChatRequest request) {
 
+        /*
+         * Validate request.
+         */
         chatRequestValidator.validate(request);
 
-        return ResponseEntity.ok(
-                supervisorAgent.process(
-                        request.getMessage().trim()
-                )
+        String sessionId =
+                request.getSessionId().trim();
+
+        String message =
+                request.getMessage().trim();
+
+        /*
+         * Load previous conversation BEFORE
+         * saving the current user message.
+         */
+        String conversationContext =
+                conversationService.buildConversationContext(
+                        sessionId
+                );
+
+        /*
+         * Save current user message.
+         */
+        conversationService.saveUserMessage(
+                sessionId,
+                message
         );
+
+        /*
+         * Send current message + previous conversation
+         * to Supervisor Agent.
+         */
+        ChatResponse response =
+                supervisorAgent.process(
+                        message,
+                        conversationContext
+                );
+
+        /*
+         * Save assistant response.
+         */
+        conversationService.saveAssistantMessage(
+                sessionId,
+                response.getAnswer()
+        );
+
+        return ResponseEntity.ok(response);
     }
 }

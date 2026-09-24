@@ -10,13 +10,22 @@ public class ChatRequestValidator {
     public void validate(ChatRequest request) {
 
         if (request == null) {
+
             throw new InvalidRequestException(
                     "Request body cannot be empty."
             );
         }
 
-        if (request.getMessage() == null ||
-                request.getMessage().trim().isEmpty()) {
+        if (request.getSessionId() == null
+                || request.getSessionId().trim().isEmpty()) {
+
+            throw new InvalidRequestException(
+                    "Session ID cannot be empty."
+            );
+        }
+
+        if (request.getMessage() == null
+                || request.getMessage().trim().isEmpty()) {
 
             throw new InvalidRequestException(
                     "Message cannot be empty."

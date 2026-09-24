@@ -6,20 +6,53 @@ import java.util.Map;
 public class SupervisorDecision {
 
     private String intent;
+
     private String entity;
 
     private Long employeeId;
+
     private String employeeName;
 
     private String department;
+
     private String location;
+
     private String role;
 
     private List<String> requestedFields;
 
     private List<String> requiredTools;
 
-    private Map<String, String> toolQueries;
+    /*
+     * The LLM may return toolQueries in different formats.
+     *
+     * Example 1:
+     *
+     * "toolQueries": {
+     *     "DATABASE": {
+     *         "entity": "EMPLOYEE",
+     *         "filters": {
+     *             "id": 101
+     *         },
+     *         "fields": [
+     *             "role"
+     *         ]
+     *     }
+     * }
+     *
+     * Example 2:
+     *
+     * "toolQueries": {
+     *     "DATABASE": "SELECT role FROM employees WHERE id = 101"
+     * }
+     *
+     * Object allows Jackson to safely accept both formats.
+     *
+     * IMPORTANT:
+     * The SQL string returned by the LLM is never executed directly.
+     * Actual database access is controlled by DatabaseTool.
+     */
+    private Map<String, Object> toolQueries;
 
     public SupervisorDecision() {
     }
@@ -96,11 +129,27 @@ public class SupervisorDecision {
         this.requiredTools = requiredTools;
     }
 
-    public Map<String, String> getToolQueries() {
+    public Map<String, Object> getToolQueries() {
         return toolQueries;
     }
 
-    public void setToolQueries(Map<String, String> toolQueries) {
+    public void setToolQueries(Map<String, Object> toolQueries) {
         this.toolQueries = toolQueries;
+    }
+
+    @Override
+    public String toString() {
+        return "SupervisorDecision{" +
+                "intent='" + intent + '\'' +
+                ", entity='" + entity + '\'' +
+                ", employeeId=" + employeeId +
+                ", employeeName='" + employeeName + '\'' +
+                ", department='" + department + '\'' +
+                ", location='" + location + '\'' +
+                ", role='" + role + '\'' +
+                ", requestedFields=" + requestedFields +
+                ", requiredTools=" + requiredTools +
+                ", toolQueries=" + toolQueries +
+                '}';
     }
 }
