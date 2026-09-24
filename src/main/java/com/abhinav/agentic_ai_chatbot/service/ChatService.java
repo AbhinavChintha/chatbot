@@ -14,9 +14,23 @@ public class ChatService {
 
     public String chat(String message) {
 
+        String prompt = """
+                Answer the user's question clearly and completely.
+
+                Rules:
+                1. Be concise, but do not cut the answer off.
+                2. Prefer a complete short explanation over a long explanation.
+                3. If the question is complex, explain the important points in a compact way.
+                4. Avoid unnecessary introductions, repetition, and conclusions.
+                5. Do not continue with unfinished headings or incomplete sentences.
+
+                USER QUESTION:
+                %s
+                """.formatted(message);
+
         return chatClient
                 .prompt()
-                .user(message)
+                .user(prompt)
                 .call()
                 .content();
     }

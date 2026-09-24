@@ -4,6 +4,8 @@ import com.abhinav.agentic_ai_chatbot.entity.Employee;
 import com.abhinav.agentic_ai_chatbot.repository.EmployeeRepository;
 import org.springframework.stereotype.Service;
 
+import java.util.List;
+
 @Service
 public class DatabaseService {
 
@@ -13,28 +15,38 @@ public class DatabaseService {
         this.employeeRepository = employeeRepository;
     }
 
-    public String getEmployeeDetails(Long employeeId) {
+    public Employee getEmployeeDetails(Long employeeId) {
 
-        return employeeRepository.findById(employeeId)
-                .map(employee -> String.format(
-                        """
-                        Employee Details:
-                        ID: %d
-                        Name: %s
-                        Department: %s
-                        Role: %s
-                        Email: %s
-                        Location: %s
-                        """,
-                        employee.getId(),
-                        employee.getName(),
-                        employee.getDepartment(),
-                        employee.getRole(),
-                        employee.getEmail(),
-                        employee.getLocation()
-                ))
-                .orElse(
-                        "Employee with ID " + employeeId + " was not found."
-                );
+        return employeeRepository
+                .findById(employeeId)
+                .orElse(null);
+    }
+
+    public Employee getEmployeeDetailsByName(String name) {
+
+        return employeeRepository
+                .findByNameIgnoreCase(name)
+                .orElse(null);
+    }
+
+    public List<Employee> getEmployeesByDepartment(
+            String department) {
+
+        return employeeRepository
+                .findByDepartmentIgnoreCase(department);
+    }
+
+    public List<Employee> getEmployeesByLocation(
+            String location) {
+
+        return employeeRepository
+                .findByLocationIgnoreCase(location);
+    }
+
+    public List<Employee> getEmployeesByRole(
+            String role) {
+
+        return employeeRepository
+                .findByRoleContainingIgnoreCase(role);
     }
 }

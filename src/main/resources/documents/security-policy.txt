@@ -1,0 +1,12 @@
+Information Security Policy
+
+Employees must protect company credentials and must not share
+passwords with other individuals.
+
+Company systems should only be accessed using authorized accounts.
+
+Employees should report suspected security incidents through the
+approved company security reporting process.
+
+Confidential company information must be handled according to
+company security requirements.
