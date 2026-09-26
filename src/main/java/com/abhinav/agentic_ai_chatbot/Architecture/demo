@@ -1,0 +1,29 @@
+
+
+                         USER
+                           |
+                           v
+                    ChatController
+                           |
+                           v
+                  Conversation Memory
+                       (MySQL)
+                           |
+                           v
+                  Supervisor Agent
+                           |
+                           v
+                  Supervisor Decision
+                           |
+             +-------------+-------------+
+             |             |             |
+             v             v             v
+         Database         RAG        Web Search
+          Tool            Tool          Tool
+             |             |             |
+             v             v             v
+          MySQL      Company Docs     Internet
+
+                           |
+                           v
+                    Final Response

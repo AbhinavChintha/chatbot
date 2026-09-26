@@ -35,7 +35,7 @@ public class WebSearchTool {
     }
 
     public ToolResult search(String query) {
-
+        System.out.println("WEB SEARCH QUERY: " + query);
         try {
 
             String jsonBody = """
@@ -157,13 +157,6 @@ public class WebSearchTool {
                 resultCount++;
             }
 
-            /*
-             * Check relevance BEFORE asking the LLM to generate
-             * the final answer.
-             *
-             * This prevents unrelated search results from being
-             * treated as valid information.
-             */
             boolean relevant =
                     hasRelevantResult(
                             query,
@@ -173,23 +166,21 @@ public class WebSearchTool {
             if (!relevant) {
 
                 System.out.println(
-                        "Web search completed, but no relevant result "
-                                + "was found for query: "
+                        "Web search completed, but no sufficiently "
+                                + "relevant result was found for query: "
                                 + query
                 );
 
                 return new ToolResult(
                         "WEB_SEARCH",
                         false,
-                        "No relevant web search results were found for: "
+                        "No sufficiently relevant web search results "
+                                + "were found for: "
                                 + query,
                         new ArrayList<>()
                 );
             }
 
-            /*
-             * Only relevant search results reach the LLM.
-             */
             String prompt = """
                     You are an enterprise web-search answer generator.
 
@@ -252,10 +243,21 @@ public class WebSearchTool {
                             .call()
                             .content();
 
+            if (answer == null
+                    || answer.trim().isEmpty()) {
+
+                return new ToolResult(
+                        "WEB_SEARCH",
+                        false,
+                        "Web search could not generate an answer.",
+                        new ArrayList<>()
+                );
+            }
+
             return new ToolResult(
                     "WEB_SEARCH",
                     true,
-                    answer,
+                    answer.trim(),
                     results
             );
 
@@ -271,15 +273,6 @@ public class WebSearchTool {
         }
     }
 
-    /**
-     * Performs a lightweight relevance check.
-     *
-     * The check intentionally avoids asking another LLM to determine
-     * whether search results are relevant.
-     *
-     * At least one meaningful query term must appear in the title,
-     * URL, or snippet of the returned results.
-     */
     private boolean hasRelevantResult(
             String query,
             List<WebSearchResult> results) {
@@ -293,23 +286,24 @@ public class WebSearchTool {
         }
 
         String normalizedQuery =
-                query.toLowerCase();
+                normalize(query);
 
         String[] queryTokens =
-                normalizedQuery
-                        .replaceAll("[^a-z0-9_-]", " ")
-                        .split("\\s+");
+                normalizedQuery.split("\\s+");
 
         /*
-         * First look for distinctive identifiers containing numbers.
+         * Detect identifier-like queries.
          *
          * Examples:
-         * XYZ123ABC999
-         * ABC123
-         * employee101
          *
-         * If the user supplied such an identifier, it must appear
-         * in at least one search result.
+         * XYZ123ABC999
+         * GPT-5
+         * ISO9001
+         * ABC123
+         *
+         * These require stronger validation because a search engine can
+         * return unrelated pages that merely contain the same character
+         * sequence.
          */
         List<String> identifierTokens =
                 Arrays.stream(queryTokens)
@@ -321,40 +315,12 @@ public class WebSearchTool {
 
         if (!identifierTokens.isEmpty()) {
 
-            for (String token : identifierTokens) {
-
-                boolean found =
-                        results.stream()
-                                .anyMatch(result ->
-                                        containsIgnoreCase(
-                                                result.getTitle(),
-                                                token
-                                        )
-                                                || containsIgnoreCase(
-                                                result.getUrl(),
-                                                token
-                                        )
-                                                || containsIgnoreCase(
-                                                result.getSnippet(),
-                                                token
-                                        )
-                                );
-
-                if (found) {
-                    return true;
-                }
-            }
-
-            return false;
+            return hasMeaningfulIdentifierEvidence(
+                    identifierTokens,
+                    results
+            );
         }
 
-        /*
-         * Normal natural-language query.
-         *
-         * Ignore common generic words so that words such as
-         * "information", "latest", and "details" do not make an
-         * unrelated search result appear relevant.
-         */
         List<String> stopWords = List.of(
                 "what",
                 "what's",
@@ -387,7 +353,7 @@ public class WebSearchTool {
         List<String> meaningfulTokens =
                 Arrays.stream(queryTokens)
                         .filter(token ->
-                                token.length() >= 4
+                                token.length() >= 2
                                         && !stopWords.contains(token)
                         )
                         .toList();
@@ -396,40 +362,237 @@ public class WebSearchTool {
             return true;
         }
 
-        for (String token : meaningfulTokens) {
+        /*
+         * Multi-word subject.
+         *
+         * Example:
+         *
+         * Spring AI
+         *
+         * First try the complete phrase.
+         * If that is not found, require all meaningful tokens
+         * to appear in the SAME result.
+         */
+        if (meaningfulTokens.size() >= 2) {
 
-            boolean found =
+            String meaningfulPhrase =
+                    String.join(
+                            " ",
+                            meaningfulTokens
+                    );
+
+            boolean exactPhraseFound =
                     results.stream()
                             .anyMatch(result ->
                                     containsIgnoreCase(
                                             result.getTitle(),
-                                            token
+                                            meaningfulPhrase
                                     )
                                             || containsIgnoreCase(
                                             result.getUrl(),
-                                            token
+                                            meaningfulPhrase
                                     )
                                             || containsIgnoreCase(
                                             result.getSnippet(),
-                                            token
+                                            meaningfulPhrase
                                     )
                             );
 
-            if (found) {
+            if (exactPhraseFound) {
+                return true;
+            }
+
+            for (WebSearchResult result : results) {
+
+                String searchableText =
+                        normalize(
+                                safeValue(result.getTitle())
+                                        + " "
+                                        + safeValue(result.getUrl())
+                                        + " "
+                                        + safeValue(result.getSnippet())
+                        );
+
+                boolean allTokensFound =
+                        meaningfulTokens.stream()
+                                .allMatch(
+                                        searchableText::contains
+                                );
+
+                if (allTokensFound) {
+                    return true;
+                }
+            }
+
+            return false;
+        }
+
+        /*
+         * Single meaningful word.
+         */
+        String singleToken =
+                meaningfulTokens.get(0);
+
+        return results.stream()
+                .anyMatch(result ->
+                        containsIgnoreCase(
+                                result.getTitle(),
+                                singleToken
+                        )
+                                || containsIgnoreCase(
+                                result.getUrl(),
+                                singleToken
+                        )
+                                || containsIgnoreCase(
+                                result.getSnippet(),
+                                singleToken
+                        )
+                );
+    }
+
+    /**
+     * Performs stronger validation for identifier-like queries.
+     *
+     * Merely finding the identifier in a page is not sufficient.
+     *
+     * Example:
+     *
+     * Query:
+     * XYZ123ABC999
+     *
+     * Result:
+     * "xyz123abc999 xyz123abc999"
+     *
+     * This is only a textual occurrence and does not establish
+     * what the identifier represents.
+     *
+     * Therefore, the result must also contain contextual language
+     * indicating that the identifier is being defined, identified,
+     * described, referenced as an entity, or otherwise explained.
+     */
+    private boolean hasMeaningfulIdentifierEvidence(
+            List<String> identifierTokens,
+            List<WebSearchResult> results) {
+
+        List<String> contextualTerms = List.of(
+                "is",
+                "means",
+                "refers",
+                "reference",
+                "identifier",
+                "code",
+                "product",
+                "model",
+                "version",
+                "project",
+                "organization",
+                "company",
+                "software",
+                "technology",
+                "device",
+                "event",
+                "case",
+                "account",
+                "number",
+                "serial",
+                "known",
+                "called",
+                "named",
+                "defined",
+                "description",
+                "described",
+                "represents",
+                "stands for",
+                "associated with"
+        );
+
+        for (WebSearchResult result : results) {
+
+            String searchableText =
+                    normalize(
+                            safeValue(result.getTitle())
+                                    + " "
+                                    + safeValue(result.getUrl())
+                                    + " "
+                                    + safeValue(result.getSnippet())
+                    );
+
+            /*
+             * First verify that the identifier actually occurs.
+             */
+            boolean identifierFound =
+                    identifierTokens.stream()
+                            .allMatch(
+                                    searchableText::contains
+                            );
+
+            if (!identifierFound) {
+                continue;
+            }
+
+            /*
+             * Then look for meaningful contextual evidence.
+             */
+            boolean contextualEvidenceFound =
+                    contextualTerms.stream()
+                            .anyMatch(
+                                    searchableText::contains
+                            );
+
+            if (contextualEvidenceFound) {
+
+                System.out.println(
+                        "Web identifier relevance accepted. "
+                                + "Identifier and contextual evidence found in: "
+                                + result.getTitle()
+                );
+
                 return true;
             }
         }
 
+        System.out.println(
+                "Web identifier relevance rejected. "
+                        + "Identifier was found, but meaningful contextual "
+                        + "evidence was not found."
+        );
+
         return false;
+    }
+
+    private String normalize(String value) {
+
+        if (value == null) {
+            return "";
+        }
+
+        return value
+                .toLowerCase()
+                .replaceAll("[^a-z0-9_-]", " ")
+                .replaceAll("\\s+", " ")
+                .trim();
+    }
+
+    private String safeValue(String value) {
+
+        return value == null
+                ? ""
+                : value;
     }
 
     private boolean containsIgnoreCase(
             String value,
             String searchTerm) {
 
-        return value != null
-                && searchTerm != null
-                && value.toLowerCase()
-                .contains(searchTerm.toLowerCase());
+        if (value == null
+                || searchTerm == null) {
+
+            return false;
+        }
+
+        return normalize(value)
+                .contains(
+                        normalize(searchTerm)
+                );
     }
 }
