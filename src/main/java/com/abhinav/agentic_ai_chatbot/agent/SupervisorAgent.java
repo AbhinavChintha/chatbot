@@ -29,7 +29,7 @@ public class SupervisorAgent {
                         message,
                         conversationContext
                 );
-
+        System.out.println("SUPERVISOR DECISION: " + decision);
         return supervisorService.execute(
                 decision,
                 message

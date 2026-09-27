@@ -25,6 +25,17 @@ public class SupervisorService {
     private final WebSearchTool webSearchTool;
     private final ChatService chatService;
 
+    private static final List<String> SUPPORTED_DATABASE_FIELDS = List.of(
+            "id",
+            "employeeid",
+            "name",
+            "employeename",
+            "department",
+            "role",
+            "email",
+            "location"
+    );
+
     public SupervisorService(
             DatabaseTool databaseTool,
             RagTool ragTool,
@@ -114,53 +125,26 @@ public class SupervisorService {
         List<String> requestedFields =
                 decision.getRequestedFields();
 
-        /*
-         * Validate requested fields before querying the database.
-         *
-         * These are the only employee fields currently supported.
-         */
-        if (requestedFields != null
-                && !requestedFields.isEmpty()) {
+        List<String> unsupportedFields =
+                findUnsupportedDatabaseFields(requestedFields);
 
-            List<String> supportedFields = List.of(
-                    "id",
-                    "employeeid",
-                    "name",
-                    "employeename",
-                    "department",
-                    "role",
-                    "email",
-                    "location"
+        if (!unsupportedFields.isEmpty()) {
+
+            String fields =
+                    String.join(
+                            ", ",
+                            unsupportedFields
+                    );
+
+            return new ChatResponse(
+                    "The requested information ("
+                            + fields
+                            + ") is not available in the employee database.",
+                    "Employee Database",
+                    "DATABASE",
+                    false,
+                    null
             );
-
-            List<String> unsupportedFields =
-                    requestedFields.stream()
-                            .filter(field ->
-                                    field != null
-                                            && !supportedFields.contains(
-                                            field.trim().toLowerCase()
-                                    )
-                            )
-                            .toList();
-
-            if (!unsupportedFields.isEmpty()) {
-
-                String fields =
-                        String.join(
-                                ", ",
-                                unsupportedFields
-                        );
-
-                return new ChatResponse(
-                        "The requested information ("
-                                + fields
-                                + ") is not available in the employee database.",
-                        "Employee Database",
-                        "DATABASE",
-                        false,
-                        null
-                );
-            }
         }
 
         ToolResult result;
@@ -541,10 +525,6 @@ public class SupervisorService {
                         databaseResult
                 );
 
-        boolean databaseSuccess =
-                databaseResult != null
-                        && databaseResult.isSuccess();
-
         if (employee != null) {
 
             databaseContext =
@@ -579,10 +559,6 @@ public class SupervisorService {
 
         ToolResult ragResult =
                 ragTool.search(ragQuery);
-
-        boolean ragSuccess =
-                ragResult != null
-                        && ragResult.isSuccess();
 
         String ragAnswer =
                 ragResult == null
@@ -651,9 +627,13 @@ public class SupervisorService {
                 new RagData(sources)
         );
 
-        boolean overallSuccess =
-                databaseSuccess
-                        && ragSuccess;
+        /*
+         * MULTI_TOOL success represents successful orchestration and
+         * response generation. A legitimate "not found" result from
+         * one tool should not make the complete request a failure.
+         * Individual tool outcomes remain available in multiToolData.
+         */
+        boolean overallSuccess = true;
 
         return new ChatResponse(
                 finalAnswer,
@@ -684,10 +664,6 @@ public class SupervisorService {
                 extractEmployees(
                         databaseResult
                 );
-
-        boolean databaseSuccess =
-                databaseResult != null
-                        && databaseResult.isSuccess();
 
         String databaseContext;
 
@@ -725,10 +701,6 @@ public class SupervisorService {
 
         ToolResult webResult =
                 webSearchTool.search(webQuery);
-
-        boolean webSuccess =
-                webResult != null
-                        && webResult.isSuccess();
 
         String webAnswer =
                 webResult == null
@@ -792,9 +764,11 @@ public class SupervisorService {
                 webSearchData
         );
 
-        boolean overallSuccess =
-                databaseSuccess
-                        && webSuccess;
+        /*
+         * The request was successfully orchestrated and a final answer
+         * was generated. Individual tool outcomes are preserved in data.
+         */
+        boolean overallSuccess = true;
 
         return new ChatResponse(
                 finalAnswer,
@@ -842,14 +816,6 @@ public class SupervisorService {
 
         ToolResult webResult =
                 webSearchTool.search(webQuery);
-
-        boolean ragSuccess =
-                ragResult != null
-                        && ragResult.isSuccess();
-
-        boolean webSuccess =
-                webResult != null
-                        && webResult.isSuccess();
 
         String ragAnswer =
                 ragResult == null
@@ -922,9 +888,11 @@ public class SupervisorService {
                 webSearchData
         );
 
-        boolean overallSuccess =
-                ragSuccess
-                        && webSuccess;
+        /*
+         * The request was successfully orchestrated and a final answer
+         * was generated. Individual tool outcomes are preserved in data.
+         */
+        boolean overallSuccess = true;
 
         return new ChatResponse(
                 finalAnswer,
@@ -955,10 +923,6 @@ public class SupervisorService {
                 extractEmployees(
                         databaseResult
                 );
-
-        boolean databaseSuccess =
-                databaseResult != null
-                        && databaseResult.isSuccess();
 
         String databaseContext;
 
@@ -1011,14 +975,6 @@ public class SupervisorService {
 
         ToolResult webResult =
                 webSearchTool.search(webQuery);
-
-        boolean ragSuccess =
-                ragResult != null
-                        && ragResult.isSuccess();
-
-        boolean webSuccess =
-                webResult != null
-                        && webResult.isSuccess();
 
         String ragAnswer =
                 ragResult == null
@@ -1106,10 +1062,11 @@ public class SupervisorService {
                 webSearchData
         );
 
-        boolean overallSuccess =
-                databaseSuccess
-                        && ragSuccess
-                        && webSuccess;
+        /*
+         * The request was successfully orchestrated and a final answer
+         * was generated. Individual tool outcomes are preserved in data.
+         */
+        boolean overallSuccess = true;
 
         return new ChatResponse(
                 finalAnswer,
@@ -1135,44 +1092,22 @@ public class SupervisorService {
          * never allow the LLM to retrieve fields that are
          * not part of the Employee database.
          */
-        if (requestedFields != null
-                && !requestedFields.isEmpty()) {
+        List<String> unsupportedFields =
+                findUnsupportedDatabaseFields(requestedFields);
 
-            List<String> supportedFields = List.of(
-                    "id",
-                    "employeeid",
-                    "name",
-                    "employeename",
-                    "department",
-                    "role",
-                    "email",
-                    "location"
+        if (!unsupportedFields.isEmpty()) {
+
+            return new ToolResult(
+                    "DATABASE",
+                    false,
+                    "The requested information ("
+                            + String.join(
+                            ", ",
+                            unsupportedFields
+                    )
+                            + ") is not available in the employee database.",
+                    null
             );
-
-            List<String> unsupportedFields =
-                    requestedFields.stream()
-                            .filter(field ->
-                                    field != null
-                                            && !supportedFields.contains(
-                                            field.trim().toLowerCase()
-                                    )
-                            )
-                            .toList();
-
-            if (!unsupportedFields.isEmpty()) {
-
-                return new ToolResult(
-                        "DATABASE",
-                        false,
-                        "The requested information ("
-                                + String.join(
-                                ", ",
-                                unsupportedFields
-                        )
-                                + ") is not available in the employee database.",
-                        null
-                );
-            }
         }
 
         /*
@@ -1236,6 +1171,29 @@ public class SupervisorService {
                 "No valid employee search criteria were provided.",
                 null
         );
+    }
+
+    // =========================================================
+    // DATABASE FIELD VALIDATION
+    // =========================================================
+
+    private List<String> findUnsupportedDatabaseFields(
+            List<String> requestedFields) {
+
+        if (requestedFields == null
+                || requestedFields.isEmpty()) {
+
+            return List.of();
+        }
+
+        return requestedFields.stream()
+                .filter(field ->
+                        field != null
+                                && !SUPPORTED_DATABASE_FIELDS.contains(
+                                field.trim().toLowerCase()
+                        )
+                )
+                .toList();
     }
 
     // =========================================================
@@ -1314,6 +1272,33 @@ public class SupervisorService {
          * Jackson represents this as a Map.
          */
         if (rawToolQuery instanceof Map<?, ?> map) {
+
+            /*
+             * If the supervisor returns a direct tool query such as:
+             *
+             * "RAG": {
+             *     "query": "company annual leave policy"
+             * }
+             *
+             * or:
+             *
+             * "WEB_SEARCH": {
+             *     "query": "latest information about Spring AI"
+             * }
+             *
+             * use that focused query directly.
+             *
+             * This is especially important for MULTI_TOOL requests.
+             * Otherwise the fallback below would return the complete
+             * original user message to the tool.
+             */
+            Object directQuery = map.get("query");
+
+            if (directQuery != null
+                    && !String.valueOf(directQuery).isBlank()) {
+
+                return String.valueOf(directQuery).trim();
+            }
 
             StringBuilder query =
                     new StringBuilder();
