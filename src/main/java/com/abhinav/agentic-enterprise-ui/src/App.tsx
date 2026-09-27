@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import {
   Bot, ChevronRight, Database, FileText, Globe2, Menu, Moon,
   Plus, Search, Send, Settings2, Sparkles, Sun, X, Zap
@@ -20,6 +20,14 @@ type Message = {
   loading?: boolean;
 };
 
+type Conversation = {
+  sessionId: string;
+  title: string;
+  messages: Message[];
+  updatedAt: number;
+};
+
+// @ts-ignore
 const API_URL = import.meta.env.VITE_API_URL || "http://localhost:8080/api/chat";
 
 const examples = [
@@ -42,7 +50,7 @@ function parseAnswer(text: string) {
     const trimmed = line.trim();
     if (!trimmed) return <div key={i} className="answer-gap" />;
     if (trimmed.startsWith("**") && trimmed.endsWith("**")) {
-      return <h3 key={i}>{trimmed.replaceAll("**", "")}</h3>;
+      return <h3 key={i}>{trimmed.replace(/\*\*/g, "")}</h3>;
     }
     if (trimmed.startsWith("- ") || trimmed.startsWith("* ")) {
       return <div key={i} className="answer-bullet">• {trimmed.slice(2)}</div>;
@@ -59,11 +67,55 @@ function App() {
   const [dark, setDark] = useState(true);
   const [showActivity, setShowActivity] = useState(true);
   const [busy, setBusy] = useState(false);
+  const [conversations, setConversations] = useState<Conversation[]>(() => {
+    try {
+      const saved = localStorage.getItem("agentic-ai-conversations");
+      return saved ? JSON.parse(saved) : [];
+    } catch {
+      return [];
+    }
+  });
 
   const lastMeta = useMemo(
     () => [...messages].reverse().find(m => m.role === "assistant" && m.meta)?.meta,
     [messages]
   );
+
+  useEffect(() => {
+    localStorage.setItem("agentic-ai-conversations", JSON.stringify(conversations));
+  }, [conversations]);
+
+  function upsertConversation(
+    currentSessionId: string,
+    currentMessages: Message[]
+  ) {
+    const firstUserMessage = currentMessages.find(m => m.role === "user");
+    if (!firstUserMessage) return;
+
+    const title = firstUserMessage.text.trim().slice(0, 42) || "New conversation";
+
+    setConversations(prev => {
+      const existing = prev.find(c => c.sessionId === currentSessionId);
+      const conversation: Conversation = {
+        sessionId: currentSessionId,
+        title: existing?.title || title,
+        messages: currentMessages.filter(m => !m.loading),
+        updatedAt: Date.now()
+      };
+
+      return [
+        conversation,
+        ...prev.filter(c => c.sessionId !== currentSessionId)
+      ];
+    });
+  }
+
+  function openConversation(conversation: Conversation) {
+    if (busy) return;
+    setSessionId(conversation.sessionId);
+    setMessages(conversation.messages);
+    setInput("");
+  }
 
   async function sendMessage(value = input) {
     const message = value.trim();
@@ -90,26 +142,37 @@ function App() {
       }
 
       const data: ApiResponse = await response.json();
-      setMessages(prev =>
-        prev.map(m =>
+      setMessages(prev => {
+        const updated = prev.map(m =>
           m.id === userId + 1
             ? { ...m, text: data.answer || "No answer returned.", meta: data, loading: false }
             : m
-        )
-      );
+        );
+        upsertConversation(sessionId, updated);
+        return updated;
+      });
     } catch (error) {
-      const detail = error instanceof Error ? error.message : "Unknown error";
+      const detail =
+          error instanceof Error
+              ? error.message
+              : "Unknown error";
+
       setMessages(prev =>
-        prev.map(m =>
-          m.id === userId + 1
-            ? {
-                ...m,
-                text: `I couldn't connect to the Spring Boot API. ${detail}`,
-                meta: { type: "ERROR", source: "Backend", success: false },
-                loading: false
-              }
-            : m
-        )
+          prev.map(m =>
+              m.id === userId + 1
+                  ? {
+                    ...m,
+                    text: `I couldn't connect to the Spring Boot API. ${detail}`,
+                    meta: {
+                      answer: `I couldn't connect to the Spring Boot API. ${detail}`,
+                      type: "ERROR" as const,
+                      source: "Backend",
+                      success: false
+                    },
+                    loading: false
+                  }
+                  : m
+          )
       );
     } finally {
       setBusy(false);
@@ -117,6 +180,10 @@ function App() {
   }
 
   function newChat() {
+    if (busy) return;
+    if (messages.some(m => m.role === "user")) {
+      upsertConversation(sessionId, messages);
+    }
     setMessages([]);
     setSessionId(`ui-${Date.now()}`);
     setInput("");
@@ -137,13 +204,23 @@ function App() {
           <Plus size={17} /> New conversation
         </button>
 
-        <div className="side-label">QUICK START</div>
-        <div className="quick-list">
-          {examples.slice(0, 3).map((q) => (
-            <button key={q} onClick={() => sendMessage(q)}>
-              <span>{q}</span><ChevronRight size={14} />
-            </button>
-          ))}
+        <div className="side-label history-label">CONVERSATIONS</div>
+        <div className="quick-list conversation-list">
+          {conversations.length === 0 ? (
+            <div className="empty-history">Your conversations will appear here.</div>
+          ) : (
+            conversations.map(conversation => (
+              <button
+                key={conversation.sessionId}
+                className={conversation.sessionId === sessionId ? "active-conversation" : ""}
+                onClick={() => openConversation(conversation)}
+                title={conversation.title}
+              >
+                <span>{conversation.title}</span>
+                <ChevronRight size={14} />
+              </button>
+            ))
+          )}
         </div>
 
         <div className="side-label history-label">SESSION</div>

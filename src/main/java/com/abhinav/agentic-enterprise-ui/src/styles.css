@@ -220,3 +220,24 @@ h1 em { font-style:normal; color:#79a8ff; }
   .suggestions { grid-template-columns:1fr; }
   h1 { font-size:39px; }
 }
+/* Add these rules to src/styles.css */
+.conversation-list {
+  max-height: 300px;
+  overflow-y: auto;
+}
+
+.empty-history {
+  padding: 12px 10px;
+  font-size: 12px;
+  line-height: 1.45;
+  opacity: 0.55;
+}
+
+.active-conversation {
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.light .active-conversation {
+  background: rgba(0, 0, 0, 0.06);
+}
+
