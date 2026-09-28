@@ -251,32 +251,28 @@ public class SupervisorAgent {
                 EXTERNAL / PUBLIC INFORMATION
                 ================================================================
 
-                If the user is asking for current, external, public,
-                internet-based, or otherwise externally verifiable information,
-                use WEB_SEARCH.
+                If the user is asking for current, time-sensitive, or
+                externally verifiable information, use WEB_SEARCH.
+
+                This includes questions whose answer depends on the current
+                date, current time, today's status, recent events, latest
+                releases, current prices, current availability, or other
+                information that can change over time.
+
+                IMPORTANT:
+                - Do not classify a current-information question as GENERAL
+                  merely because the model already knows or can infer an answer.
+                - If the user explicitly asks for information as of now,
+                  today, recently, currently, or the latest state, WEB_SEARCH
+                  is the authoritative source.
+                - This is a source-selection rule, not a list of specific
+                  questions. Interpret the user's complete meaning.
 
                 Also use WEB_SEARCH when the question asks about a subject,
                 identifier, product, technology, organization, event, or
                 other entity that is not represented in the enterprise
                 database or company documents and answering requires checking
                 public information.
-
-                Examples:
-
-                "What is the latest information about Spring AI?"
-                -> WEB_SEARCH
-
-                "What is the latest version of Spring Boot?"
-                -> WEB_SEARCH
-
-                "What is XYZ123ABC999?"
-                -> WEB_SEARCH
-
-                Do not classify an unfamiliar public subject as GENERAL merely
-                because the model itself does not recognize it.
-
-                The WEB_SEARCH tool determines whether useful external
-                information actually exists.
 
                 ================================================================
                 GENERAL KNOWLEDGE

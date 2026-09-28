@@ -273,6 +273,16 @@ public class WebSearchTool {
         }
     }
 
+    /**
+     * Performs a lightweight relevance check without another LLM call.
+     *
+     * The check is intentionally tolerant of natural-language search
+     * results. Search-result wording does not need to reproduce every
+     * word from the user's question.
+     *
+     * Identifier-like queries continue to use the stronger validation
+     * implemented in hasMeaningfulIdentifierEvidence().
+     */
     private boolean hasRelevantResult(
             String query,
             List<WebSearchResult> results) {
@@ -285,25 +295,17 @@ public class WebSearchTool {
             return false;
         }
 
-        String normalizedQuery =
-                normalize(query);
-
-        String[] queryTokens =
-                normalizedQuery.split("\\s+");
+        String normalizedQuery = normalize(query);
+        String[] queryTokens = normalizedQuery.split("\\s+");
 
         /*
-         * Detect identifier-like queries.
+         * Identifier-like queries require stronger evidence.
          *
          * Examples:
-         *
          * XYZ123ABC999
          * GPT-5
          * ISO9001
          * ABC123
-         *
-         * These require stronger validation because a search engine can
-         * return unrelated pages that merely contain the same character
-         * sequence.
          */
         List<String> identifierTokens =
                 Arrays.stream(queryTokens)
@@ -314,13 +316,20 @@ public class WebSearchTool {
                         .toList();
 
         if (!identifierTokens.isEmpty()) {
-
             return hasMeaningfulIdentifierEvidence(
                     identifierTokens,
                     results
             );
         }
 
+        /*
+         * Generic natural-language queries.
+         *
+         * Words such as "latest", "current", "what", "information",
+         * "version", "release", etc. describe the request rather than
+         * the subject being searched for, so they should not be required
+         * to appear in the result.
+         */
         List<String> stopWords = List.of(
                 "what",
                 "what's",
@@ -347,7 +356,17 @@ public class WebSearchTool {
                 "give",
                 "show",
                 "price",
-                "stock"
+                "stock",
+                "version",
+                "versions",
+                "feature",
+                "features",
+                "release",
+                "releases",
+                "update",
+                "updates",
+                "news",
+                "status"
         );
 
         List<String> meaningfulTokens =
@@ -363,91 +382,101 @@ public class WebSearchTool {
         }
 
         /*
-         * Multi-word subject.
+         * Score each result rather than requiring every query token.
          *
-         * Example:
+         * Title matches are stronger because titles usually identify
+         * the subject of the result. A single strong title match is
+         * enough for short/current-information queries such as
+         * "what is today's date?".
          *
-         * Spring AI
-         *
-         * First try the complete phrase.
-         * If that is not found, require all meaningful tokens
-         * to appear in the SAME result.
+         * For multi-word subjects, multiple token matches or an exact
+         * subject phrase provide stronger evidence.
          */
-        if (meaningfulTokens.size() >= 2) {
+        for (WebSearchResult result : results) {
 
-            String meaningfulPhrase =
-                    String.join(
-                            " ",
-                            meaningfulTokens
-                    );
+            String title = safeValue(result.getTitle());
+            String url = safeValue(result.getUrl());
+            String snippet = safeValue(result.getSnippet());
 
-            boolean exactPhraseFound =
-                    results.stream()
-                            .anyMatch(result ->
-                                    containsIgnoreCase(
-                                            result.getTitle(),
-                                            meaningfulPhrase
-                                    )
-                                            || containsIgnoreCase(
-                                            result.getUrl(),
-                                            meaningfulPhrase
-                                    )
-                                            || containsIgnoreCase(
-                                            result.getSnippet(),
-                                            meaningfulPhrase
-                                    )
-                            );
+            String normalizedTitle = normalize(title);
+            String normalizedUrl = normalize(url);
+            String normalizedSnippet = normalize(snippet);
 
-            if (exactPhraseFound) {
-                return true;
-            }
+            int score = 0;
+            int tokenMatches = 0;
 
-            for (WebSearchResult result : results) {
+            for (String token : meaningfulTokens) {
 
-                String searchableText =
-                        normalize(
-                                safeValue(result.getTitle())
-                                        + " "
-                                        + safeValue(result.getUrl())
-                                        + " "
-                                        + safeValue(result.getSnippet())
-                        );
+                boolean titleMatch =
+                        normalizedTitle.contains(token);
 
-                boolean allTokensFound =
-                        meaningfulTokens.stream()
-                                .allMatch(
-                                        searchableText::contains
-                                );
+                boolean urlMatch =
+                        normalizedUrl.contains(token);
 
-                if (allTokensFound) {
-                    return true;
+                boolean snippetMatch =
+                        normalizedSnippet.contains(token);
+
+                if (titleMatch) {
+                    score += 2;
+                    tokenMatches++;
+                } else if (urlMatch || snippetMatch) {
+                    score += 1;
+                    tokenMatches++;
                 }
             }
 
-            return false;
+            /*
+             * Strong signal for a multi-word subject such as
+             * "spring boot" or "spring ai".
+             */
+            if (meaningfulTokens.size() >= 2) {
+
+                String subjectPhrase =
+                        meaningfulTokens.get(0)
+                                + " "
+                                + meaningfulTokens.get(1);
+
+                if (normalizedTitle.contains(subjectPhrase)
+                        || normalizedUrl.contains(subjectPhrase)
+                        || normalizedSnippet.contains(subjectPhrase)) {
+
+                    score += 2;
+                }
+            }
+
+            /*
+             * Accept:
+             * - one strong title match, or
+             * - two or more query-term matches, or
+             * - a strong multi-word subject phrase.
+             *
+             * This avoids rejecting legitimate search results merely
+             * because they use different wording for modifiers such as
+             * "today", "latest", "current", "release", etc.
+             */
+            if (score >= 2
+                    && (tokenMatches >= 1
+                    || meaningfulTokens.size() >= 2)) {
+
+                System.out.println(
+                        "Web relevance accepted. Query: "
+                                + query
+                                + " | Result: "
+                                + title
+                                + " | Score: "
+                                + score
+                );
+
+                return true;
+            }
         }
 
-        /*
-         * Single meaningful word.
-         */
-        String singleToken =
-                meaningfulTokens.get(0);
+        System.out.println(
+                "Web relevance rejected. Query: "
+                        + query
+        );
 
-        return results.stream()
-                .anyMatch(result ->
-                        containsIgnoreCase(
-                                result.getTitle(),
-                                singleToken
-                        )
-                                || containsIgnoreCase(
-                                result.getUrl(),
-                                singleToken
-                        )
-                                || containsIgnoreCase(
-                                result.getSnippet(),
-                                singleToken
-                        )
-                );
+        return false;
     }
 
     /**
@@ -568,6 +597,7 @@ public class WebSearchTool {
 
         return value
                 .toLowerCase()
+                .replaceAll("[\\u2018\\u2019']", "")
                 .replaceAll("[^a-z0-9_-]", " ")
                 .replaceAll("\\s+", " ")
                 .trim();
