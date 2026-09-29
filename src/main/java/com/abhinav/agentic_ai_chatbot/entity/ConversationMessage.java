@@ -21,12 +21,22 @@ public class ConversationMessage {
     @Column(name = "message", nullable = false, columnDefinition = "TEXT")
     private String message;
 
-    @Column(name = "created_at", nullable = false)
+    @Column(name = "source", length = 100)
+    private String source;
+
+    @Column(name = "type", length = 50)
+    private String type;
+
+    @Column(name = "success")
+    private Boolean success;
+
+    @Column(name = "created_at")
     private LocalDateTime createdAt;
 
     public ConversationMessage() {
     }
 
+    // Existing constructor - useful for USER messages
     public ConversationMessage(
             String sessionId,
             String role,
@@ -38,8 +48,30 @@ public class ConversationMessage {
         this.createdAt = LocalDateTime.now();
     }
 
+    // New constructor - for ASSISTANT messages with metadata
+    public ConversationMessage(
+            String sessionId,
+            String role,
+            String message,
+            String source,
+            String type,
+            Boolean success) {
+
+        this.sessionId = sessionId;
+        this.role = role;
+        this.message = message;
+        this.source = source;
+        this.type = type;
+        this.success = success;
+        this.createdAt = LocalDateTime.now();
+    }
+
     public Long getId() {
         return id;
+    }
+
+    public void setId(Long id) {
+        this.id = id;
     }
 
     public String getSessionId() {
@@ -64,6 +96,30 @@ public class ConversationMessage {
 
     public void setMessage(String message) {
         this.message = message;
+    }
+
+    public String getSource() {
+        return source;
+    }
+
+    public void setSource(String source) {
+        this.source = source;
+    }
+
+    public String getType() {
+        return type;
+    }
+
+    public void setType(String type) {
+        this.type = type;
+    }
+
+    public Boolean getSuccess() {
+        return success;
+    }
+
+    public void setSuccess(Boolean success) {
+        this.success = success;
     }
 
     public LocalDateTime getCreatedAt() {

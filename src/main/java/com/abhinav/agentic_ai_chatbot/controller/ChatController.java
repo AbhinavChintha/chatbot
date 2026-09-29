@@ -131,7 +131,10 @@ public class ChatController {
          */
         conversationService.saveAssistantMessage(
                 sessionId,
-                response.getAnswer()
+                response.getAnswer(),
+                response.getSource(),
+                response.getType(),
+                response.isSuccess()
         );
 
         return ResponseEntity.ok(response);

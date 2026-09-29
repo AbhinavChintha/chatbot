@@ -20,11 +20,20 @@ type Message = {
   loading?: boolean;
 };
 
-type Conversation = {
+type ConversationSummary = {
   sessionId: string;
   title: string;
-  messages: Message[];
-  updatedAt: number;
+  createdAt: string;
+  updatedAt: string;
+  messageCount: number;
+};
+
+type ConversationMessage = {
+  id: number;
+  sessionId: string;
+  role: string;
+  message: string;
+  createdAt: string;
 };
 
 // @ts-ignore
@@ -67,14 +76,11 @@ function App() {
   const [dark, setDark] = useState(true);
   const [showActivity, setShowActivity] = useState(true);
   const [busy, setBusy] = useState(false);
-  const [conversations, setConversations] = useState<Conversation[]>(() => {
-    try {
-      const saved = localStorage.getItem("agentic-ai-conversations");
-      return saved ? JSON.parse(saved) : [];
-    } catch {
-      return [];
-    }
-  });
+  const [conversations, setConversations] = useState<ConversationSummary[]>([]);
+  const [historyLoading, setHistoryLoading] = useState(true);
+  const [historyError, setHistoryError] = useState("");
+
+  const conversationsUrl = API_URL.replace(/\/chat\/?$/, "/conversations");
 
   const lastMeta = useMemo(
     () => [...messages].reverse().find(m => m.role === "assistant" && m.meta)?.meta,
@@ -82,39 +88,78 @@ function App() {
   );
 
   useEffect(() => {
-    localStorage.setItem("agentic-ai-conversations", JSON.stringify(conversations));
-  }, [conversations]);
+    loadConversations(true);
+  }, []);
 
-  function upsertConversation(
-    currentSessionId: string,
-    currentMessages: Message[]
-  ) {
-    const firstUserMessage = currentMessages.find(m => m.role === "user");
-    if (!firstUserMessage) return;
+  async function loadConversations(openLatest = false) {
+    setHistoryLoading(true);
+    setHistoryError("");
 
-    const title = firstUserMessage.text.trim().slice(0, 42) || "New conversation";
+    try {
+      const response = await fetch(conversationsUrl);
 
-    setConversations(prev => {
-      const existing = prev.find(c => c.sessionId === currentSessionId);
-      const conversation: Conversation = {
-        sessionId: currentSessionId,
-        title: existing?.title || title,
-        messages: currentMessages.filter(m => !m.loading),
-        updatedAt: Date.now()
-      };
+      if (!response.ok) {
+        throw new Error(`API returned ${response.status}`);
+      }
 
-      return [
-        conversation,
-        ...prev.filter(c => c.sessionId !== currentSessionId)
-      ];
-    });
+      const data: ConversationSummary[] = await response.json();
+      setConversations(data);
+
+      if (openLatest && data.length > 0) {
+        await openConversation(data[0]);
+      }
+    } catch (error) {
+      const detail =
+        error instanceof Error
+          ? error.message
+          : "Unknown error";
+
+      setHistoryError(`Unable to load conversation history. ${detail}`);
+    } finally {
+      setHistoryLoading(false);
+    }
   }
 
-  function openConversation(conversation: Conversation) {
+  function mapConversationMessages(
+    storedMessages: ConversationMessage[]
+  ): Message[] {
+    return storedMessages.map((message) => ({
+      id: message.id,
+      role: message.role.toLowerCase() === "user"
+        ? "user"
+        : "assistant",
+      text: message.message
+    }));
+  }
+
+  async function openConversation(conversation: ConversationSummary) {
     if (busy) return;
-    setSessionId(conversation.sessionId);
-    setMessages(conversation.messages);
-    setInput("");
+
+    try {
+      setHistoryError("");
+
+      const response = await fetch(
+        `${conversationsUrl}/${encodeURIComponent(conversation.sessionId)}`
+      );
+
+      if (!response.ok) {
+        throw new Error(`API returned ${response.status}`);
+      }
+
+      const storedMessages: ConversationMessage[] =
+        await response.json();
+
+      setSessionId(conversation.sessionId);
+      setMessages(mapConversationMessages(storedMessages));
+      setInput("");
+    } catch (error) {
+      const detail =
+        error instanceof Error
+          ? error.message
+          : "Unknown error";
+
+      setHistoryError(`Unable to open conversation. ${detail}`);
+    }
   }
 
   async function sendMessage(value = input) {
@@ -142,15 +187,15 @@ function App() {
       }
 
       const data: ApiResponse = await response.json();
-      setMessages(prev => {
-        const updated = prev.map(m =>
+      setMessages(prev =>
+        prev.map(m =>
           m.id === userId + 1
             ? { ...m, text: data.answer || "No answer returned.", meta: data, loading: false }
             : m
-        );
-        upsertConversation(sessionId, updated);
-        return updated;
-      });
+        )
+      );
+
+      await loadConversations(false);
     } catch (error) {
       const detail =
           error instanceof Error
@@ -181,12 +226,11 @@ function App() {
 
   function newChat() {
     if (busy) return;
-    if (messages.some(m => m.role === "user")) {
-      upsertConversation(sessionId, messages);
-    }
+
     setMessages([]);
     setSessionId(`ui-${Date.now()}`);
     setInput("");
+    setHistoryError("");
   }
 
   return (
@@ -206,7 +250,9 @@ function App() {
 
         <div className="side-label history-label">CONVERSATIONS</div>
         <div className="quick-list conversation-list">
-          {conversations.length === 0 ? (
+          {historyLoading ? (
+            <div className="empty-history">Loading conversations...</div>
+          ) : conversations.length === 0 ? (
             <div className="empty-history">Your conversations will appear here.</div>
           ) : (
             conversations.map(conversation => (
@@ -222,6 +268,10 @@ function App() {
             ))
           )}
         </div>
+
+        {historyError && (
+          <div className="history-error">{historyError}</div>
+        )}
 
         <div className="side-label history-label">SESSION</div>
         <div className="session-card">

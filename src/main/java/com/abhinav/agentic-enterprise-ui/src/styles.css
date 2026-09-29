@@ -241,3 +241,54 @@ h1 em { font-style:normal; color:#79a8ff; }
   background: rgba(0, 0, 0, 0.06);
 }
 
+
+/* Persistent conversation history */
+.conversation-list {
+  max-height: 300px;
+  overflow-y: auto;
+  scrollbar-width: thin;
+}
+
+.empty-history {
+  padding: 12px 10px;
+  font-size: 12px;
+  line-height: 1.45;
+  color: #7f8da2;
+}
+
+.active-conversation {
+  background: rgba(255, 255, 255, 0.08) !important;
+  color: #eef4ff !important;
+}
+
+.active-conversation::before {
+  content: "";
+  width: 3px;
+  height: 18px;
+  border-radius: 999px;
+  background: #7c8cff;
+  flex: 0 0 auto;
+}
+
+.history-error {
+  margin: 4px 9px 0;
+  padding: 8px 9px;
+  border: 1px solid rgba(255, 99, 99, 0.25);
+  border-radius: 8px;
+  color: #ff9b9b;
+  background: rgba(255, 99, 99, 0.06);
+  font-size: 10px;
+  line-height: 1.4;
+}
+
+.light .active-conversation {
+  background: rgba(60, 75, 120, 0.08) !important;
+  color: #172033 !important;
+}
+
+.light .history-error {
+  color: #b42318;
+  background: #fff5f5;
+  border-color: #ffd0d0;
+}
+F

@@ -11,4 +11,6 @@ public interface ConversationMessageRepository
     List<ConversationMessage> findBySessionIdOrderByCreatedAtAsc(
             String sessionId
     );
+
+    List<ConversationMessage> findAllByOrderByCreatedAtAsc();
 }
