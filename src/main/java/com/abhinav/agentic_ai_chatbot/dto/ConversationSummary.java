@@ -31,7 +31,8 @@ public class ConversationSummary {
         return sessionId;
     }
 
-    public void setSessionId(String sessionId) {
+    public void setSessionId(
+            String sessionId) {
         this.sessionId = sessionId;
     }
 
@@ -39,7 +40,8 @@ public class ConversationSummary {
         return title;
     }
 
-    public void setTitle(String title) {
+    public void setTitle(
+            String title) {
         this.title = title;
     }
 
@@ -47,7 +49,8 @@ public class ConversationSummary {
         return createdAt;
     }
 
-    public void setCreatedAt(LocalDateTime createdAt) {
+    public void setCreatedAt(
+            LocalDateTime createdAt) {
         this.createdAt = createdAt;
     }
 
@@ -55,7 +58,8 @@ public class ConversationSummary {
         return updatedAt;
     }
 
-    public void setUpdatedAt(LocalDateTime updatedAt) {
+    public void setUpdatedAt(
+            LocalDateTime updatedAt) {
         this.updatedAt = updatedAt;
     }
 
@@ -63,7 +67,8 @@ public class ConversationSummary {
         return messageCount;
     }
 
-    public void setMessageCount(int messageCount) {
+    public void setMessageCount(
+            int messageCount) {
         this.messageCount = messageCount;
     }
 }

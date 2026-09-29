@@ -18,7 +18,11 @@ public class ConversationMessage {
     @Column(name = "role", nullable = false, length = 20)
     private String role;
 
-    @Column(name = "message", nullable = false, columnDefinition = "TEXT")
+    @Column(
+            name = "message",
+            nullable = false,
+            columnDefinition = "TEXT"
+    )
     private String message;
 
     @Column(name = "source", length = 100)
@@ -30,13 +34,12 @@ public class ConversationMessage {
     @Column(name = "success")
     private Boolean success;
 
-    @Column(name = "created_at")
+    @Column(name = "created_at", nullable = false)
     private LocalDateTime createdAt;
 
     public ConversationMessage() {
     }
 
-    // Existing constructor - useful for USER messages
     public ConversationMessage(
             String sessionId,
             String role,
@@ -48,7 +51,6 @@ public class ConversationMessage {
         this.createdAt = LocalDateTime.now();
     }
 
-    // New constructor - for ASSISTANT messages with metadata
     public ConversationMessage(
             String sessionId,
             String role,

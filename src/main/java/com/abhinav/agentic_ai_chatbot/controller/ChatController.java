@@ -34,8 +34,10 @@ public class ChatController {
             ConversationService conversationService) {
 
         this.supervisorAgent = supervisorAgent;
-        this.chatRequestValidator = chatRequestValidator;
-        this.conversationService = conversationService;
+        this.chatRequestValidator =
+                chatRequestValidator;
+        this.conversationService =
+                conversationService;
     }
 
     @Operation(
@@ -54,11 +56,14 @@ public class ChatController {
 
             @ApiResponse(
                     responseCode = "200",
-                    description = "Chat response generated successfully",
+                    description =
+                            "Chat response generated successfully",
                     content = @Content(
-                            mediaType = "application/json",
+                            mediaType =
+                                    "application/json",
                             schema = @Schema(
-                                    implementation = ChatResponse.class
+                                    implementation =
+                                            ChatResponse.class
                             )
                     )
             ),
@@ -67,8 +72,10 @@ public class ChatController {
                     responseCode = "400",
                     description = "Invalid request",
                     content = @Content(
-                            mediaType = "application/json",
-                            examples = @ExampleObject(
+                            mediaType =
+                                    "application/json",
+                            examples =
+                            @ExampleObject(
                                     value = """
                                             {
                                               "error": "Session ID cannot be empty."
@@ -80,7 +87,8 @@ public class ChatController {
 
             @ApiResponse(
                     responseCode = "500",
-                    description = "Internal server error"
+                    description =
+                            "Internal server error"
             )
     })
     @PostMapping
@@ -88,9 +96,6 @@ public class ChatController {
             @RequestBody(required = false)
             ChatRequest request) {
 
-        /*
-         * Validate request.
-         */
         chatRequestValidator.validate(request);
 
         String sessionId =
@@ -100,13 +105,14 @@ public class ChatController {
                 request.getMessage().trim();
 
         /*
-         * Load previous conversation BEFORE
+         * Load previous conversation before
          * saving the current user message.
          */
         String conversationContext =
-                conversationService.buildConversationContext(
-                        sessionId
-                );
+                conversationService
+                        .buildConversationContext(
+                                sessionId
+                        );
 
         /*
          * Save current user message.
@@ -117,8 +123,8 @@ public class ChatController {
         );
 
         /*
-         * Send current message + previous conversation
-         * to Supervisor Agent.
+         * Process the request through
+         * the Supervisor Agent.
          */
         ChatResponse response =
                 supervisorAgent.process(
@@ -127,15 +133,17 @@ public class ChatController {
                 );
 
         /*
-         * Save assistant response.
+         * Persist assistant response together
+         * with source/type/success metadata.
          */
-        conversationService.saveAssistantMessage(
-                sessionId,
-                response.getAnswer(),
-                response.getSource(),
-                response.getType(),
-                response.isSuccess()
-        );
+        conversationService
+                .saveAssistantMessage(
+                        sessionId,
+                        response.getAnswer(),
+                        response.getSource(),
+                        response.getType(),
+                        response.isSuccess()
+                );
 
         return ResponseEntity.ok(response);
     }

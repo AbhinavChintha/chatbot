@@ -26,32 +26,30 @@ public class ConversationController {
     public ConversationController(
             ConversationService conversationService) {
 
-        this.conversationService = conversationService;
+        this.conversationService =
+                conversationService;
     }
 
     @Operation(
             summary = "Get all conversations",
-            description = """
-                    Returns all persisted conversation sessions.
-
-                    Conversations are ordered by most recently
-                    updated first.
-                    """
+            description =
+                    "Returns all persisted conversation sessions, ordered by most recently updated first."
     )
     @ApiResponses({
-
             @ApiResponse(
                     responseCode = "200",
-                    description = "Conversations retrieved successfully"
+                    description =
+                            "Conversations retrieved successfully"
             ),
-
             @ApiResponse(
                     responseCode = "500",
-                    description = "Internal server error"
+                    description =
+                            "Internal server error"
             )
     })
     @GetMapping
-    public ResponseEntity<List<ConversationSummary>>
+    public ResponseEntity<
+            List<ConversationSummary>>
     getConversations() {
 
         return ResponseEntity.ok(
@@ -62,40 +60,40 @@ public class ConversationController {
 
     @Operation(
             summary = "Get conversation messages",
-            description = """
-                    Returns all messages belonging to the specified
-                    conversation session in chronological order.
-                    """
+            description =
+                    "Returns all messages for a session, including persisted response source metadata when available."
     )
     @ApiResponses({
-
             @ApiResponse(
                     responseCode = "200",
-                    description = "Conversation retrieved successfully"
+                    description =
+                            "Conversation retrieved successfully"
             ),
-
             @ApiResponse(
                     responseCode = "404",
-                    description = "Conversation not found"
+                    description =
+                            "Conversation not found"
             ),
-
             @ApiResponse(
                     responseCode = "500",
-                    description = "Internal server error"
+                    description =
+                            "Internal server error"
             )
     })
     @GetMapping("/{sessionId}")
-    public ResponseEntity<List<ConversationMessage>>
+    public ResponseEntity<
+            List<ConversationMessage>>
     getConversation(
             @PathVariable String sessionId) {
 
         List<ConversationMessage> messages =
-                conversationService.getConversation(
-                        sessionId
-                );
+                conversationService
+                        .getConversation(sessionId);
 
         if (messages.isEmpty()) {
-            return ResponseEntity.notFound().build();
+            return ResponseEntity
+                    .notFound()
+                    .build();
         }
 
         return ResponseEntity.ok(messages);
