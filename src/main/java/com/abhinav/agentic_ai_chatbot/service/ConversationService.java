@@ -1,3 +1,4 @@
+
 package com.abhinav.agentic_ai_chatbot.service;
 
 import com.abhinav.agentic_ai_chatbot.dto.ConversationSummary;
@@ -6,12 +7,15 @@ import com.abhinav.agentic_ai_chatbot.repository.ConversationMessageRepository;
 import org.springframework.stereotype.Service;
 
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 
 @Service
 public class ConversationService {
+
+    private static final int MAX_CONTEXT_MESSAGES = 10;
 
     private final ConversationMessageRepository repository;
 
@@ -67,17 +71,34 @@ public class ConversationService {
     public String buildConversationContext(
             String sessionId) {
 
-        List<ConversationMessage> messages =
-                getConversation(sessionId);
+        /*
+         * Fetch only the most recent messages.
+         * This limits how much conversation history
+         * is sent to the Supervisor Agent.
+         */
+        List<ConversationMessage> recentMessages =
+                repository
+                        .findTop10BySessionIdOrderByIdDesc(
+                                sessionId
+                        );
 
-        if (messages.isEmpty()) {
+        if (recentMessages.isEmpty()) {
             return "No previous conversation exists.";
         }
+
+        /*
+         * The repository returns newest first.
+         * Reverse the list to restore chronological order.
+         */
+        List<ConversationMessage> contextMessages =
+                new ArrayList<>(recentMessages);
+
+        Collections.reverse(contextMessages);
 
         StringBuilder context =
                 new StringBuilder();
 
-        for (ConversationMessage message : messages) {
+        for (ConversationMessage message : contextMessages) {
 
             context
                     .append(message.getRole())
@@ -91,6 +112,8 @@ public class ConversationService {
 
     /*
      * Returns a summary of every conversation session.
+     * This method continues to use the full history
+     * for the conversation list.
      */
     public List<ConversationSummary> getConversationSummaries() {
 
@@ -150,7 +173,8 @@ public class ConversationService {
         }
 
         /*
-         * Most recently updated conversations should appear first.
+         * Most recently updated conversations
+         * should appear first.
          */
         summaries.sort(
                 (first, second) ->
@@ -164,9 +188,8 @@ public class ConversationService {
     }
 
     /*
-     * Creates a simple title from the first user message.
-     *
-     * We intentionally do not call an LLM just to generate a title.
+     * Creates a title from the first user message.
+     * No LLM call is needed for this operation.
      */
     private String buildConversationTitle(
             List<ConversationMessage> messages) {
@@ -185,9 +208,6 @@ public class ConversationService {
 
                 text = text.trim();
 
-                /*
-                 * Keep sidebar titles short.
-                 */
                 if (text.length() > 50) {
                     return text.substring(0, 50) + "...";
                 }

@@ -1,3 +1,4 @@
+
 package com.abhinav.agentic_ai_chatbot.repository;
 
 import com.abhinav.agentic_ai_chatbot.entity.ConversationMessage;
@@ -9,6 +10,11 @@ public interface ConversationMessageRepository
         extends JpaRepository<ConversationMessage, Long> {
 
     List<ConversationMessage> findBySessionIdOrderByCreatedAtAsc(
+            String sessionId
+    );
+
+    // Fetch only the latest 10 messages for AI context.
+    List<ConversationMessage> findTop10BySessionIdOrderByIdDesc(
             String sessionId
     );
 
