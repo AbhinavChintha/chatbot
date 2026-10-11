@@ -35,7 +35,9 @@ public class WebSearchTool {
     }
 
     public ToolResult search(String query) {
+
         System.out.println("WEB SEARCH QUERY: " + query);
+
         try {
 
             String jsonBody = """
@@ -126,11 +128,26 @@ public class WebSearchTool {
                 String snippet =
                         result.path("snippet").asText();
 
+                /*
+                 * Preserve the optional date supplied by Serper.
+                 *
+                 * The value may be a relative date such as
+                 * "2 days ago". If no date is supplied, leave it null.
+                 * Never invent a publication date.
+                 */
+                String date =
+                        result.path("date").asText("");
+
+                if (date.isBlank()) {
+                    date = null;
+                }
+
                 results.add(
                         new WebSearchResult(
                                 title,
                                 link,
-                                snippet
+                                snippet,
+                                date
                         )
                 );
 
@@ -147,6 +164,15 @@ public class WebSearchTool {
                 searchContext
                         .append("URL: ")
                         .append(link)
+                        .append("\n");
+
+                searchContext
+                        .append("Search result date: ")
+                        .append(
+                                date != null
+                                        ? date
+                                        : "Not provided"
+                        )
                         .append("\n");
 
                 searchContext
@@ -189,39 +215,68 @@ public class WebSearchTool {
 
                     STRICT RULES:
 
-                    1. Use only facts supported by the supplied search results.
+                    1. Use only facts supported by the supplied search
+                       results.
 
                     2. Prefer official, primary, and authoritative sources
                        when available.
 
-                    3. Prefer the most recent information when the question
-                       asks for current information.
+                    3. Each result includes a "Search result date" field.
+                       Use it when provided as evidence of the date
+                       displayed by the search engine.
 
-                    4. If sources contain different information, briefly
-                       explain the difference.
+                       This date may be relative, such as "2 days ago".
+                       It may represent a publication date and does not
+                       necessarily represent the page's last-updated time.
 
-                    5. Distinguish different concepts when necessary.
-                       For example, latest release and latest LTS release
-                       may be different.
+                    4. For questions asking for current information,
+                       prefer recent, relevant, dated results.
 
-                    6. Do not invent facts, dates, versions, measurements,
-                       or explanations.
+                       Do not assume an undated result is current merely
+                       because it appears in the search results.
 
-                    7. If the supplied results cannot answer the question,
-                       clearly say that there is not enough information.
+                    5. For questions about current weather, distinguish
+                       the observation time from the time the article
+                       or webpage was published.
 
-                    8. Keep the answer concise but complete.
+                       Do not present an old weather observation as
+                       current weather.
 
-                    9. Do not leave the answer unfinished.
+                    6. If sources provide conflicting information,
+                       compare their dates and observation times when
+                       available.
 
-                    10. Do not include source URLs in the answer.
+                       Briefly explain meaningful conflicts. Do not
+                       choose an answer simply because more sources
+                       repeat it.
+
+                    7. If the results do not establish a reliable current
+                       answer, clearly say that the available results
+                       are insufficient. Do not guess.
+
+                    8. Distinguish different concepts when necessary.
+                       For example, the latest software release and
+                       the latest LTS release may be different.
+
+                    9. Do not invent facts, dates, versions, measurements,
+                       observation times, or explanations.
+
+                    10. If the supplied results cannot answer the
+                        question, clearly say that there is not enough
+                        information.
+
+                    11. Keep the answer concise but complete.
+
+                    12. Do not leave the answer unfinished.
+
+                    13. Do not include source URLs in the answer.
                         URLs are returned separately in the API response.
 
-                    11. Do not repeat the entire search results.
+                    14. Do not repeat the entire search results.
 
-                    12. For current information such as weather, clearly
-                        mention the relevant observation time or date when
-                        it is available in the search results.
+                    15. For current information such as weather, clearly
+                        mention the relevant observation time or date
+                        when it is available in the search results.
 
                     USER QUESTION:
                     %s
@@ -327,8 +382,7 @@ public class WebSearchTool {
          *
          * Words such as "latest", "current", "what", "information",
          * "version", "release", etc. describe the request rather than
-         * the subject being searched for, so they should not be required
-         * to appear in the result.
+         * the subject being searched for.
          */
         List<String> stopWords = List.of(
                 "what",
@@ -383,14 +437,6 @@ public class WebSearchTool {
 
         /*
          * Score each result rather than requiring every query token.
-         *
-         * Title matches are stronger because titles usually identify
-         * the subject of the result. A single strong title match is
-         * enough for short/current-information queries such as
-         * "what is today's date?".
-         *
-         * For multi-word subjects, multiple token matches or an exact
-         * subject phrase provide stronger evidence.
          */
         for (WebSearchResult result : results) {
 
@@ -445,14 +491,8 @@ public class WebSearchTool {
             }
 
             /*
-             * Accept:
-             * - one strong title match, or
-             * - two or more query-term matches, or
-             * - a strong multi-word subject phrase.
-             *
-             * This avoids rejecting legitimate search results merely
-             * because they use different wording for modifiers such as
-             * "today", "latest", "current", "release", etc.
+             * Accept a strong title match, multiple token matches,
+             * or a strong multi-word subject phrase.
              */
             if (score >= 2
                     && (tokenMatches >= 1
@@ -483,21 +523,8 @@ public class WebSearchTool {
      * Performs stronger validation for identifier-like queries.
      *
      * Merely finding the identifier in a page is not sufficient.
-     *
-     * Example:
-     *
-     * Query:
-     * XYZ123ABC999
-     *
-     * Result:
-     * "xyz123abc999 xyz123abc999"
-     *
-     * This is only a textual occurrence and does not establish
+     * The result must also contain contextual language explaining
      * what the identifier represents.
-     *
-     * Therefore, the result must also contain contextual language
-     * indicating that the identifier is being defined, identified,
-     * described, referenced as an entity, or otherwise explained.
      */
     private boolean hasMeaningfulIdentifierEvidence(
             List<String> identifierTokens,
