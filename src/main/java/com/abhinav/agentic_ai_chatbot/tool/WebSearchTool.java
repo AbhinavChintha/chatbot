@@ -126,11 +126,20 @@ public class WebSearchTool {
                 String snippet =
                         result.path("snippet").asText();
 
+                /*
+                 * Serper may provide a human-readable publication/update
+                 * date (for example, "2 days ago"). It is optional, so
+                 * preserve it when present without inventing a date.
+                 */
+                String date =
+                        result.path("date").asText("");
+
                 results.add(
                         new WebSearchResult(
                                 title,
                                 link,
-                                snippet
+                                snippet,
+                                date.isBlank() ? null : date
                         )
                 );
 
@@ -148,6 +157,17 @@ public class WebSearchTool {
                         .append("URL: ")
                         .append(link)
                         .append("\n");
+
+                if (date != null && !date.isBlank()) {
+                    searchContext
+                            .append("Search result date: ")
+                            .append(date)
+                            .append("\n");
+                } else {
+                    searchContext
+                            .append("Search result date: Not provided")
+                            .append("\n");
+                }
 
                 searchContext
                         .append("Snippet: ")
@@ -194,32 +214,46 @@ public class WebSearchTool {
                     2. Prefer official, primary, and authoritative sources
                        when available.
 
-                    3. Prefer the most recent information when the question
-                       asks for current information.
+                    3. For each result, use "Search result date" when
+                       supplied as evidence of its displayed publication or
+                       update date. This date may be relative (for example,
+                       "2 days ago") and may not be the page's last-updated
+                       time.
 
-                    4. If sources contain different information, briefly
-                       explain the difference.
+                    4. Prefer the most recent dated, relevant information
+                       when the question asks for current information.
+                       Do not assume an undated result is current merely
+                       because it appears in search results.
 
-                    5. Distinguish different concepts when necessary.
+                    5. If sources contain different information, compare
+                       their dates and observation times when available.
+                       Briefly explain meaningful conflicts; do not choose
+                       a majority answer when dates or evidence do not
+                       establish which source is current.
+
+                    6. If the results do not establish a reliable current
+                       answer, say so clearly instead of guessing.
+
+                    7. Distinguish different concepts when necessary.
                        For example, latest release and latest LTS release
                        may be different.
 
-                    6. Do not invent facts, dates, versions, measurements,
+                    8. Do not invent facts, dates, versions, measurements,
                        or explanations.
 
-                    7. If the supplied results cannot answer the question,
+                    9. If the supplied results cannot answer the question,
                        clearly say that there is not enough information.
 
-                    8. Keep the answer concise but complete.
+                    10. Keep the answer concise but complete.
 
-                    9. Do not leave the answer unfinished.
+                    11. Do not leave the answer unfinished.
 
-                    10. Do not include source URLs in the answer.
+                    12. Do not include source URLs in the answer.
                         URLs are returned separately in the API response.
 
-                    11. Do not repeat the entire search results.
+                    13. Do not repeat the entire search results.
 
-                    12. For current information such as weather, clearly
+                    14. For current information such as weather, clearly
                         mention the relevant observation time or date when
                         it is available in the search results.
 
