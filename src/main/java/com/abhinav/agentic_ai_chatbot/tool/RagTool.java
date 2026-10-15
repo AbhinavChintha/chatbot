@@ -5,12 +5,19 @@ import org.springframework.ai.chat.client.ChatClient;
 import org.springframework.ai.document.Document;
 import org.springframework.ai.embedding.EmbeddingModel;
 import org.springframework.ai.transformer.splitter.TokenTextSplitter;
-import org.springframework.ai.vectorstore.SimpleVectorStore;
+import org.springframework.ai.vectorstore.VectorStore;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.boot.CommandLineRunner;
 import org.springframework.core.io.Resource;
 import org.springframework.core.io.support.PathMatchingResourcePatternResolver;
 import org.springframework.stereotype.Component;
+import org.springframework.beans.factory.annotation.Value;
+import org.springframework.jdbc.core.JdbcTemplate;
+
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
+import java.util.HexFormat;
+import java.util.Map;
 
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
@@ -24,121 +31,155 @@ public class RagTool implements CommandLineRunner {
     private static final double MAX_DISTANCE = 0.35;
     private static final int MAX_RESULTS = 2;
 
-    private final SimpleVectorStore vectorStore;
+    private final VectorStore vectorStore;
     private final EmbeddingModel embeddingModel;
     private final ChatClient chatClient;
+    private final JdbcTemplate vectorStoreJdbcTemplate;
+
 
     public RagTool(
-            SimpleVectorStore vectorStore,
+            VectorStore vectorStore,
             @Qualifier("googleGenAiTextEmbedding")
             EmbeddingModel embeddingModel,
-            ChatClient.Builder chatClientBuilder) {
+            ChatClient.Builder chatClientBuilder,
+            @Qualifier("vectorStoreJdbcTemplate")
+            JdbcTemplate vectorStoreJdbcTemplate) {
 
         this.vectorStore = vectorStore;
         this.embeddingModel = embeddingModel;
         this.chatClient = chatClientBuilder.build();
+        this.vectorStoreJdbcTemplate = vectorStoreJdbcTemplate;
     }
 
+
     public void loadDocuments() {
-
         try {
-
             PathMatchingResourcePatternResolver resolver =
                     new PathMatchingResourcePatternResolver();
 
             Resource[] resources =
-                    resolver.getResources(
-                            "classpath:/documents/*.txt"
-                    );
+                    resolver.getResources("classpath:/documents/*.txt");
 
-            List<Document> documents =
-                    new ArrayList<>();
+            if (resources.length == 0) {
+                throw new RuntimeException(
+                        "No RAG documents found in classpath:/documents/");
+            }
+
+            TokenTextSplitter splitter = TokenTextSplitter.builder()
+                    .withChunkSize(300)
+                    .withMinChunkSizeChars(100)
+                    .withMinChunkLengthToEmbed(5)
+                    .withMaxNumChunks(10000)
+                    .withKeepSeparator(true)
+                    .build();
+
+            Set<String> currentSources = new LinkedHashSet<>();
 
             for (Resource resource : resources) {
+                String source = resource.getFilename();
 
-                String content =
-                        new String(
-                                resource.getInputStream().readAllBytes(),
-                                StandardCharsets.UTF_8
-                        );
-
-                Document document =
-                        new Document(content);
-
-                document.getMetadata().put(
-                        "source",
-                        resource.getFilename()
-                );
-
-                documents.add(document);
-
-                System.out.println(
-                        "Document loaded: "
-                                + resource.getFilename()
-                );
-            }
-
-            if (documents.isEmpty()) {
-
-                throw new RuntimeException(
-                        "No RAG documents found in classpath:/documents/"
-                );
-            }
-
-            TokenTextSplitter splitter =
-                    TokenTextSplitter.builder()
-                            .withChunkSize(300)
-                            .withMinChunkSizeChars(100)
-                            .withMinChunkLengthToEmbed(5)
-                            .withMaxNumChunks(10000)
-                            .withKeepSeparator(true)
-                            .build();
-
-            List<Document> chunks =
-                    new ArrayList<>();
-
-            for (Document document : documents) {
-
-                List<Document> documentChunks =
-                        splitter.apply(
-                                List.of(document)
-                        );
-
-                String source =
-                        document.getMetadata()
-                                .get("source")
-                                .toString();
-
-                for (Document chunk : documentChunks) {
-
-                    chunk.getMetadata().put(
-                            "source",
-                            source
-                    );
+                if (source == null) {
+                    continue;
                 }
 
-                chunks.addAll(documentChunks);
+                currentSources.add(source);
+
+                String content = new String(
+                        resource.getInputStream().readAllBytes(),
+                        StandardCharsets.UTF_8);
+
+                String contentHash = sha256(content);
+
+                List<String> existingHashes = vectorStoreJdbcTemplate.query(
+                        "SELECT content_hash FROM public.rag_document_registry "
+                                + "WHERE source_name = ?",
+                        (rs, rowNum) -> rs.getString("content_hash"),
+                        source);
+
+                if (!existingHashes.isEmpty()
+                        && contentHash.equals(existingHashes.get(0))) {
+                    System.out.println(
+                            "Skipping unchanged RAG document: " + source);
+                    continue;
+                }
+
+                System.out.println(
+                        "Indexing new or changed RAG document: " + source);
+
+                // Remove old vectors for this source before re-indexing.
+                vectorStoreJdbcTemplate.update(
+                        "DELETE FROM public.vector_store "
+                                + "WHERE metadata->>'source' = ?",
+                        source);
+
+                Document document = new Document(content);
+                document.getMetadata().put("source", source);
+
+                List<Document> chunks = splitter.apply(List.of(document));
+
+                for (Document chunk : chunks) {
+                    chunk.getMetadata().put("source", source);
+                }
+
+                if (!chunks.isEmpty()) {
+                    vectorStore.add(chunks);
+                }
+
+                // Record the hash only after indexing completes.
+                vectorStoreJdbcTemplate.update(
+                        """
+                        INSERT INTO public.rag_document_registry
+                            (source_name, content_hash, indexed_at)
+                        VALUES (?, ?, CURRENT_TIMESTAMP)
+                        ON CONFLICT (source_name)
+                        DO UPDATE SET
+                            content_hash = EXCLUDED.content_hash,
+                            indexed_at = CURRENT_TIMESTAMP
+                        """,
+                        source,
+                        contentHash);
+
+                System.out.println(
+                        "Indexed " + chunks.size() + " chunks for " + source);
             }
 
-            System.out.println(
-                    "Total document chunks created: "
-                            + chunks.size()
-            );
+            // Remove vectors for policy files that no longer exist.
+            List<String> registeredSources = vectorStoreJdbcTemplate.query(
+                    "SELECT source_name FROM public.rag_document_registry",
+                    (rs, rowNum) -> rs.getString("source_name"));
 
-            vectorStore.add(chunks);
+            for (String registeredSource : registeredSources) {
+                if (!currentSources.contains(registeredSource)) {
+                    vectorStoreJdbcTemplate.update(
+                            "DELETE FROM public.vector_store "
+                                    + "WHERE metadata->>'source' = ?",
+                            registeredSource);
 
-            System.out.println(
-                    "RAG vector store initialized successfully."
-            );
+                    vectorStoreJdbcTemplate.update(
+                            "DELETE FROM public.rag_document_registry "
+                                    + "WHERE source_name = ?",
+                            registeredSource);
+
+                    System.out.println(
+                            "Removed deleted RAG document: " + registeredSource);
+                }
+            }
+
+            System.out.println("RAG vector store initialization completed.");
 
         } catch (Exception e) {
-
             throw new RuntimeException(
-                    "Failed to load RAG documents",
-                    e
-            );
+                    "Failed to load RAG documents", e);
         }
     }
+
+    private String sha256(String content) throws NoSuchAlgorithmException {
+        byte[] hash = MessageDigest.getInstance("SHA-256")
+                .digest(content.getBytes(StandardCharsets.UTF_8));
+
+        return HexFormat.of().formatHex(hash);
+    }
+
 
     public ToolResult search(String query) {
 

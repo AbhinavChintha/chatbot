@@ -1,9 +1,9 @@
-
 package com.abhinav.agentic_ai_chatbot.service;
 
 import com.abhinav.agentic_ai_chatbot.dto.ConversationSummary;
 import com.abhinav.agentic_ai_chatbot.entity.ConversationMessage;
 import com.abhinav.agentic_ai_chatbot.repository.ConversationMessageRepository;
+
 import org.springframework.stereotype.Service;
 
 import java.util.ArrayList;
@@ -21,7 +21,6 @@ public class ConversationService {
 
     public ConversationService(
             ConversationMessageRepository repository) {
-
         this.repository = repository;
     }
 
@@ -63,45 +62,30 @@ public class ConversationService {
             String sessionId) {
 
         return repository
-                .findBySessionIdOrderByCreatedAtAsc(
-                        sessionId
-                );
+                .findBySessionIdOrderByCreatedAtAsc(sessionId);
     }
 
     public String buildConversationContext(
             String sessionId) {
 
-        /*
-         * Fetch only the most recent messages.
-         * This limits how much conversation history
-         * is sent to the Supervisor Agent.
-         */
         List<ConversationMessage> recentMessages =
-                repository
-                        .findTop10BySessionIdOrderByIdDesc(
-                                sessionId
-                        );
+                repository.findTop10BySessionIdOrderByIdDesc(
+                        sessionId
+                );
 
         if (recentMessages.isEmpty()) {
             return "No previous conversation exists.";
         }
 
-        /*
-         * The repository returns newest first.
-         * Reverse the list to restore chronological order.
-         */
         List<ConversationMessage> contextMessages =
                 new ArrayList<>(recentMessages);
 
         Collections.reverse(contextMessages);
 
-        StringBuilder context =
-                new StringBuilder();
+        StringBuilder context = new StringBuilder();
 
         for (ConversationMessage message : contextMessages) {
-
-            context
-                    .append(message.getRole())
+            context.append(message.getRole())
                     .append(": ")
                     .append(message.getMessage())
                     .append("\n");
@@ -110,11 +94,27 @@ public class ConversationService {
         return context.toString();
     }
 
-    /*
-     * Returns a summary of every conversation session.
-     * This method continues to use the full history
-     * for the conversation list.
+    /**
+     * Returns a previously successful answer for the same
+     * question in the same session, if one exists.
      */
+    public ConversationMessage findCachedAnswer(
+            String sessionId,
+            String question) {
+
+        List<ConversationMessage> cachedAnswers =
+                repository.findCachedAnswers(
+                        sessionId,
+                        question
+                );
+
+        if (cachedAnswers.isEmpty()) {
+            return null;
+        }
+
+        return cachedAnswers.get(0);
+    }
+
     public List<ConversationSummary> getConversationSummaries() {
 
         List<ConversationMessage> messages =
@@ -124,13 +124,10 @@ public class ConversationService {
                 new LinkedHashMap<>();
 
         for (ConversationMessage message : messages) {
-
-            grouped
-                    .computeIfAbsent(
-                            message.getSessionId(),
-                            key -> new ArrayList<>()
-                    )
-                    .add(message);
+            grouped.computeIfAbsent(
+                    message.getSessionId(),
+                    key -> new ArrayList<>()
+            ).add(message);
         }
 
         List<ConversationSummary> summaries =
@@ -157,9 +154,7 @@ public class ConversationService {
                     );
 
             String title =
-                    buildConversationTitle(
-                            sessionMessages
-                    );
+                    buildConversationTitle(sessionMessages);
 
             summaries.add(
                     new ConversationSummary(
@@ -172,35 +167,23 @@ public class ConversationService {
             );
         }
 
-        /*
-         * Most recently updated conversations
-         * should appear first.
-         */
         summaries.sort(
                 (first, second) ->
                         second.getUpdatedAt()
-                                .compareTo(
-                                        first.getUpdatedAt()
-                                )
+                                .compareTo(first.getUpdatedAt())
         );
 
         return summaries;
     }
 
-    /*
-     * Creates a title from the first user message.
-     * No LLM call is needed for this operation.
-     */
     private String buildConversationTitle(
             List<ConversationMessage> messages) {
 
         for (ConversationMessage message : messages) {
 
-            if ("USER".equalsIgnoreCase(
-                    message.getRole())) {
+            if ("USER".equalsIgnoreCase(message.getRole())) {
 
-                String text =
-                        message.getMessage();
+                String text = message.getMessage();
 
                 if (text == null || text.isBlank()) {
                     return "New Conversation";

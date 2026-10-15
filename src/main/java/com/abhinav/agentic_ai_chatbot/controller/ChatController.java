@@ -7,7 +7,7 @@ import com.abhinav.agentic_ai_chatbot.dto.ChatResponse;
 import com.abhinav.agentic_ai_chatbot.service.ConversationService;
 import com.abhinav.agentic_ai_chatbot.service.CurrentDateTimeService;
 import com.abhinav.agentic_ai_chatbot.validation.ChatRequestValidator;
-
+import com.abhinav.agentic_ai_chatbot.entity.ConversationMessage;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.media.Content;
 import io.swagger.v3.oas.annotations.media.ExampleObject;
@@ -94,6 +94,7 @@ public class ChatController {
                     description = "Internal server error"
             )
     })
+
     @PostMapping
     public ResponseEntity<ChatResponse> chat(
             @RequestBody(required = false) ChatRequest request) {
@@ -101,14 +102,61 @@ public class ChatController {
         long requestStart = System.nanoTime();
 
         try {
-            // 1. Validate request.
             chatRequestValidator.validate(request);
 
             String sessionId = request.getSessionId().trim();
             String message = request.getMessage().trim();
 
-            // 2. Load previous conversation.
             long stageStart = System.nanoTime();
+
+            // Check for a previous successful answer before saving
+            // the repeated question to conversation history.
+            ConversationMessage cachedAnswer =
+                    conversationService.findCachedAnswer(
+                            sessionId,
+                            message
+                    );
+
+            log.info(
+                    "Chat latency | stage=checkCache | durationMs={}",
+                    elapsedMs(stageStart)
+            );
+
+            if (cachedAnswer != null) {
+
+                log.info(
+                        "Response cache hit | sessionId={}",
+                        sessionId
+                );
+
+                // Save this repeated question in conversation history.
+                conversationService.saveUserMessage(
+                        sessionId,
+                        message
+                );
+
+                // Reuse the previous answer without invoking the agent.
+                ChatResponse response = new ChatResponse(
+                        cachedAnswer.getMessage(),
+                        cachedAnswer.getSource(),
+                        cachedAnswer.getType(),
+                        cachedAnswer.getSuccess() != null
+                                && cachedAnswer.getSuccess(),
+                        null
+                );
+
+                conversationService.saveAssistantMessage(
+                        sessionId,
+                        response.getAnswer(),
+                        response.getSource(),
+                        response.getType(),
+                        response.isSuccess()
+                );
+
+                return ResponseEntity.ok(response);
+            }
+
+            stageStart = System.nanoTime();
 
             String conversationContext =
                     conversationService.buildConversationContext(sessionId);
@@ -118,17 +166,18 @@ public class ChatController {
                     elapsedMs(stageStart)
             );
 
-            // 3. Save user message.
             stageStart = System.nanoTime();
 
-            conversationService.saveUserMessage(sessionId, message);
+            conversationService.saveUserMessage(
+                    sessionId,
+                    message
+            );
 
             log.info(
                     "Chat latency | stage=saveUserMessage | durationMs={}",
                     elapsedMs(stageStart)
             );
 
-            // 4. Handle local date/time questions or call the Supervisor.
             stageStart = System.nanoTime();
 
             ChatResponse response =
@@ -146,7 +195,6 @@ public class ChatController {
                     elapsedMs(stageStart)
             );
 
-            // 5. Save assistant response and metadata.
             stageStart = System.nanoTime();
 
             conversationService.saveAssistantMessage(
@@ -165,7 +213,6 @@ public class ChatController {
             return ResponseEntity.ok(response);
 
         } finally {
-            // Log total request time, including failures.
             log.info(
                     "Chat latency | stage=totalRequest | durationMs={}",
                     elapsedMs(requestStart)
