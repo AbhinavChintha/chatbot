@@ -1,6 +1,7 @@
 package com.abhinav.agentic_ai_chatbot.entity;
 
 import jakarta.persistence.*;
+import com.fasterxml.jackson.annotation.JsonIgnore;
 
 import java.time.LocalDateTime;
 
@@ -14,6 +15,10 @@ public class ConversationMessage {
 
     @Column(name = "session_id", nullable = false, length = 100)
     private String sessionId;
+
+    @JsonIgnore
+    @Column(name = "owner_username", nullable = false, length = 100)
+    private String ownerUsername;
 
     @Column(name = "role", nullable = false, length = 20)
     private String role;
@@ -41,10 +46,12 @@ public class ConversationMessage {
     }
 
     public ConversationMessage(
+            String ownerUsername,
             String sessionId,
             String role,
             String message) {
 
+        this.ownerUsername = ownerUsername;
         this.sessionId = sessionId;
         this.role = role;
         this.message = message;
@@ -52,6 +59,7 @@ public class ConversationMessage {
     }
 
     public ConversationMessage(
+            String ownerUsername,
             String sessionId,
             String role,
             String message,
@@ -59,6 +67,7 @@ public class ConversationMessage {
             String type,
             Boolean success) {
 
+        this.ownerUsername = ownerUsername;
         this.sessionId = sessionId;
         this.role = role;
         this.message = message;
@@ -78,6 +87,14 @@ public class ConversationMessage {
 
     public String getSessionId() {
         return sessionId;
+    }
+
+    public String getOwnerUsername() {
+        return ownerUsername;
+    }
+
+    public void setOwnerUsername(String ownerUsername) {
+        this.ownerUsername = ownerUsername;
     }
 
     public void setSessionId(String sessionId) {

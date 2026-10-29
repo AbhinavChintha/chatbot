@@ -7,31 +7,29 @@ import org.springframework.stereotype.Service;
 public class ChatService {
 
     private final ChatClient chatClient;
+    private final GenerationPolicy generationPolicy;
 
-    public ChatService(ChatClient.Builder chatClientBuilder) {
+    public ChatService(ChatClient.Builder chatClientBuilder, GenerationPolicy generationPolicy) {
         this.chatClient = chatClientBuilder.build();
+        this.generationPolicy = generationPolicy;
     }
 
     public String chat(String message) {
 
-        String prompt = """
-                Answer the user's question clearly and completely.
+        return generate(AnswerPrompt.build(AnswerPrompt.Task.GENERAL, message, null), false);
+    }
 
-                Rules:
-                1. Be concise, but do not cut the answer off.
-                2. Prefer a complete short explanation over a long explanation.
-                3. If the question is complex, explain the important points in a compact way.
-                4. Avoid unnecessary introductions, repetition, and conclusions.
-                5. Do not continue with unfinished headings or incomplete sentences.
+    public String synthesize(String question, String... evidenceSections) {
+        return generate(AnswerPrompt.synthesis(question, evidenceSections), true);
+    }
 
-                USER QUESTION:
-                %s
-                """.formatted(message);
-
-        return chatClient
+    private String generate(AnswerPrompt prompt, boolean synthesis) {
+        return prompt.format(chatClient
                 .prompt()
-                .user(prompt)
+                .system(prompt.system())
+                .user(prompt.user())
+                .options(synthesis ? generationPolicy.synthesis() : generationPolicy.answer())
                 .call()
-                .content();
+                .content());
     }
 }

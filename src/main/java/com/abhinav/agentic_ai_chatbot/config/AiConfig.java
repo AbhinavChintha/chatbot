@@ -17,7 +17,13 @@ import javax.sql.DataSource;
 @Configuration
 public class AiConfig {
 
+    @Bean(name = "mysqlJdbcTemplate")
+    public JdbcTemplate mysqlJdbcTemplate(DataSource dataSource) {
+        return new JdbcTemplate(dataSource);
+    }
+
     @Bean(name = "vectorStoreJdbcTemplate")
+    @Primary
     public JdbcTemplate vectorStoreJdbcTemplate(
             @Value("${app.vectorstore.postgres.url}") String url,
             @Value("${app.vectorstore.postgres.username}") String username,

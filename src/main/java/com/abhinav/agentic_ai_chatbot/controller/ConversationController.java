@@ -3,18 +3,22 @@ package com.abhinav.agentic_ai_chatbot.controller;
 import com.abhinav.agentic_ai_chatbot.dto.ConversationSummary;
 import com.abhinav.agentic_ai_chatbot.entity.ConversationMessage;
 import com.abhinav.agentic_ai_chatbot.service.ConversationService;
+import com.abhinav.agentic_ai_chatbot.service.ConversationSessionService;
+import com.abhinav.agentic_ai_chatbot.dto.CreateConversationRequest;
+import jakarta.validation.Valid;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.responses.ApiResponse;
 import io.swagger.v3.oas.annotations.responses.ApiResponses;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import org.springframework.http.ResponseEntity;
+import org.springframework.security.core.Authentication;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.List;
+import java.util.UUID;
 
 @RestController
 @RequestMapping("/api/conversations")
-@CrossOrigin(origins = "http://localhost:5173")
 @Tag(
         name = "Conversation History",
         description = "APIs for retrieving persisted chatbot conversations"
@@ -22,12 +26,26 @@ import java.util.List;
 public class ConversationController {
 
     private final ConversationService conversationService;
+    private final ConversationSessionService sessions;
 
     public ConversationController(
-            ConversationService conversationService) {
+            ConversationService conversationService,
+            ConversationSessionService sessions) {
 
         this.conversationService =
                 conversationService;
+        this.sessions = sessions;
+    }
+
+    public record CreatedConversation(String sessionId) { }
+
+    @PostMapping
+    @Operation(summary = "Create a conversation idempotently",
+            description = "Reuse the same creationKey when retrying. Keys are scoped to the authenticated owner.")
+    public CreatedConversation create(
+            @Valid @RequestBody CreateConversationRequest request, Authentication authentication) {
+        return new CreatedConversation(sessions.create(
+                authentication.getName(), UUID.fromString(request.creationKey())));
     }
 
     @Operation(
@@ -50,11 +68,13 @@ public class ConversationController {
     @GetMapping
     public ResponseEntity<
             List<ConversationSummary>>
-    getConversations() {
+    getConversations(Authentication authentication) {
 
         return ResponseEntity.ok(
                 conversationService
-                        .getConversationSummaries()
+                        .getConversationSummaries(
+                                authentication.getName()
+                        )
         );
     }
 
@@ -84,11 +104,15 @@ public class ConversationController {
     public ResponseEntity<
             List<ConversationMessage>>
     getConversation(
-            @PathVariable String sessionId) {
+            @PathVariable String sessionId,
+            Authentication authentication) {
 
         List<ConversationMessage> messages =
                 conversationService
-                        .getConversation(sessionId);
+                        .getConversation(
+                                authentication.getName(),
+                                sessionId
+                        );
 
         if (messages.isEmpty()) {
             return ResponseEntity

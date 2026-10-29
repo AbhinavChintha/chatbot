@@ -239,7 +239,7 @@ public class SupervisorService {
         if (result.getData() instanceof Employee employee) {
 
             String answer =
-                    buildEmployeeAnswer(
+                    EmployeeAnswerFormatter.single(
                             employee,
                             requestedFields
                     );
@@ -269,7 +269,7 @@ public class SupervisorService {
             }
 
             return new ChatResponse(
-                    formatEmployees(employees),
+                    EmployeeAnswerFormatter.multiple(employees, requestedFields),
                     "Employee Database",
                     "DATABASE",
                     true,
@@ -565,36 +565,10 @@ public class SupervisorService {
                         ? "RAG tool did not return a result."
                         : ragResult.getAnswer();
 
-        String context = """
-                Employee Database Information:
-
-                %s
-
-                Company Document Information:
-
-                %s
-
-                Original User Question:
-
-                %s
-
-                Answer the user's question using the information above.
-
-                Do not invent information.
-
-                If employee information was not found,
-                clearly state that.
-
-                If company documents do not provide enough
-                information, clearly state that.
-                """.formatted(
-                databaseContext,
-                ragAnswer,
-                originalMessage
-        );
-
         String finalAnswer =
-                chatService.chat(context);
+                chatService.synthesize(originalMessage,
+                        "Employee Database Information:\n" + databaseContext,
+                        "Company Document Information:\n" + ragAnswer);
 
         List<String> sources =
                 extractSources(
@@ -707,38 +681,10 @@ public class SupervisorService {
                         ? "Web search did not return a result."
                         : webResult.getAnswer();
 
-        String context = """
-                Employee Database Information:
-
-                %s
-
-                Current External Information:
-
-                %s
-
-                Original User Question:
-
-                %s
-
-                Answer the user's question using the
-                employee information and current external
-                information above.
-
-                Do not invent information.
-
-                If the employee was not found in the database,
-                clearly state that.
-
-                If the web search does not provide enough
-                information, clearly state that.
-                """.formatted(
-                databaseContext,
-                webAnswer,
-                originalMessage
-        );
-
         String finalAnswer =
-                chatService.chat(context);
+                chatService.synthesize(originalMessage,
+                        "Employee Database Information:\n" + databaseContext,
+                        "Current External Information:\n" + webAnswer);
 
         WebSearchData webSearchData =
                 new WebSearchData(
@@ -827,37 +773,10 @@ public class SupervisorService {
                         ? "Web search did not return a result."
                         : webResult.getAnswer();
 
-        String context = """
-                Company Document Information:
-
-                %s
-
-                Current External Information:
-
-                %s
-
-                Original User Question:
-
-                %s
-
-                Answer the user's question using the
-                information provided above.
-
-                Do not invent information.
-
-                If the company documents do not provide
-                enough information, clearly state that.
-
-                If the web search does not provide enough
-                information, clearly state that.
-                """.formatted(
-                ragAnswer,
-                webAnswer,
-                originalMessage
-        );
-
         String finalAnswer =
-                chatService.chat(context);
+                chatService.synthesize(originalMessage,
+                        "Company Document Information:\n" + ragAnswer,
+                        "Current External Information:\n" + webAnswer);
 
         List<String> ragSources =
                 extractSources(
@@ -986,45 +905,11 @@ public class SupervisorService {
                         ? "Web search did not return a result."
                         : webResult.getAnswer();
 
-        String context = """
-                Employee Database Information:
-
-                %s
-
-                Company Document Information:
-
-                %s
-
-                Current External Information:
-
-                %s
-
-                Original User Question:
-
-                %s
-
-                Answer the user's question using the
-                information provided above.
-
-                Do not invent information.
-
-                If employee information was not found,
-                clearly state that.
-
-                If company documents do not provide enough
-                information, clearly state that.
-
-                If web search does not provide enough
-                information, clearly state that.
-                """.formatted(
-                databaseContext,
-                ragAnswer,
-                webAnswer,
-                originalMessage
-        );
-
         String finalAnswer =
-                chatService.chat(context);
+                chatService.synthesize(originalMessage,
+                        "Employee Database Information:\n" + databaseContext,
+                        "Company Document Information:\n" + ragAnswer,
+                        "Current External Information:\n" + webAnswer);
 
         List<String> ragSources =
                 extractSources(

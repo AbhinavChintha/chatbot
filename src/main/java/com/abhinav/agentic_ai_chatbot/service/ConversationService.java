@@ -5,6 +5,8 @@ import com.abhinav.agentic_ai_chatbot.entity.ConversationMessage;
 import com.abhinav.agentic_ai_chatbot.repository.ConversationMessageRepository;
 
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
+import org.springframework.data.domain.PageRequest;
 
 import java.util.ArrayList;
 import java.util.Collections;
@@ -16,20 +18,33 @@ import java.util.Map;
 public class ConversationService {
 
     private static final int MAX_CONTEXT_MESSAGES = 10;
+    private static final int MAX_CONTEXT_CHARS = 6_000;
+    private static final int MAX_CONTEXT_MESSAGE_CHARS = 1_000;
 
     private final ConversationMessageRepository repository;
+    private final ConversationQuota quota;
 
     public ConversationService(
-            ConversationMessageRepository repository) {
+            ConversationMessageRepository repository,
+            ConversationQuota quota) {
         this.repository = repository;
+        this.quota = quota;
     }
 
+    public int maxQuestions() {
+        return quota.maxQuestions();
+    }
+
+    @Transactional
     public void saveUserMessage(
+            String ownerUsername,
             String sessionId,
             String message) {
 
+        quota.consume(ownerUsername, sessionId);
         ConversationMessage conversationMessage =
                 new ConversationMessage(
+                        ownerUsername,
                         sessionId,
                         "USER",
                         message
@@ -39,6 +54,7 @@ public class ConversationService {
     }
 
     public void saveAssistantMessage(
+            String ownerUsername,
             String sessionId,
             String message,
             String source,
@@ -47,6 +63,7 @@ public class ConversationService {
 
         ConversationMessage conversationMessage =
                 new ConversationMessage(
+                        ownerUsername,
                         sessionId,
                         "ASSISTANT",
                         message,
@@ -59,17 +76,23 @@ public class ConversationService {
     }
 
     public List<ConversationMessage> getConversation(
+            String ownerUsername,
             String sessionId) {
 
         return repository
-                .findBySessionIdOrderByCreatedAtAsc(sessionId);
+                .findByOwnerUsernameAndSessionIdOrderByCreatedAtAsc(
+                        ownerUsername,
+                        sessionId
+                );
     }
 
     public String buildConversationContext(
+            String ownerUsername,
             String sessionId) {
 
         List<ConversationMessage> recentMessages =
-                repository.findTop10BySessionIdOrderByIdDesc(
+                repository.findTop10ByOwnerUsernameAndSessionIdOrderByIdDesc(
+                        ownerUsername,
                         sessionId
                 );
 
@@ -77,21 +100,22 @@ public class ConversationService {
             return "No previous conversation exists.";
         }
 
-        List<ConversationMessage> contextMessages =
-                new ArrayList<>(recentMessages);
-
-        Collections.reverse(contextMessages);
-
-        StringBuilder context = new StringBuilder();
-
-        for (ConversationMessage message : contextMessages) {
-            context.append(message.getRole())
-                    .append(": ")
-                    .append(message.getMessage())
-                    .append("\n");
+        List<String> boundedMessages = new ArrayList<>();
+        int chars = 0;
+        for (ConversationMessage message : recentMessages.stream().limit(MAX_CONTEXT_MESSAGES).toList()) {
+            String text = message.getMessage();
+            if (text.length() > MAX_CONTEXT_MESSAGE_CHARS) {
+                text = text.substring(0, MAX_CONTEXT_MESSAGE_CHARS) + "...";
+            }
+            String entry = message.getRole() + ": " + text + "\n";
+            if (chars + entry.length() > MAX_CONTEXT_CHARS) {
+                break;
+            }
+            boundedMessages.add(entry);
+            chars += entry.length();
         }
-
-        return context.toString();
+        Collections.reverse(boundedMessages);
+        return String.join("", boundedMessages);
     }
 
     /**
@@ -99,13 +123,16 @@ public class ConversationService {
      * question in the same session, if one exists.
      */
     public ConversationMessage findCachedAnswer(
+            String ownerUsername,
             String sessionId,
             String question) {
 
         List<ConversationMessage> cachedAnswers =
                 repository.findCachedAnswers(
+                        ownerUsername,
                         sessionId,
-                        question
+                        question,
+                        PageRequest.of(0, 1)
                 );
 
         if (cachedAnswers.isEmpty()) {
@@ -115,10 +142,13 @@ public class ConversationService {
         return cachedAnswers.get(0);
     }
 
-    public List<ConversationSummary> getConversationSummaries() {
+    public List<ConversationSummary> getConversationSummaries(
+            String ownerUsername) {
 
         List<ConversationMessage> messages =
-                repository.findAllByOrderByCreatedAtAsc();
+                repository.findByOwnerUsernameOrderByCreatedAtAsc(
+                        ownerUsername
+                );
 
         Map<String, List<ConversationMessage>> grouped =
                 new LinkedHashMap<>();

@@ -79,7 +79,7 @@ public class CurrentDateTimeService {
         }
 
         return new ChatResponse(
-                answer.toString(),
+                "### Answer\n\n" + answer,
                 "Java Date/Time API",
                 "GENERAL",
                 true,

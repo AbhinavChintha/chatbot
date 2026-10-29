@@ -2,6 +2,8 @@ package com.abhinav.agentic_ai_chatbot.tool;
 
 import com.abhinav.agentic_ai_chatbot.dto.ToolResult;
 import com.abhinav.agentic_ai_chatbot.dto.WebSearchResult;
+import com.abhinav.agentic_ai_chatbot.service.AnswerPrompt;
+import com.abhinav.agentic_ai_chatbot.service.GenerationPolicy;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.springframework.ai.chat.client.ChatClient;
@@ -22,16 +24,18 @@ public class WebSearchTool {
     private final HttpClient httpClient;
     private final ObjectMapper objectMapper;
     private final ChatClient chatClient;
+    private final GenerationPolicy generationPolicy;
 
     @Value("${SERPER_API_KEY}")
     private String serperApiKey;
 
     public WebSearchTool(
-            ChatClient.Builder chatClientBuilder) {
+            ChatClient.Builder chatClientBuilder, GenerationPolicy generationPolicy) {
 
         this.httpClient = HttpClient.newHttpClient();
         this.objectMapper = new ObjectMapper();
         this.chatClient = chatClientBuilder.build();
+        this.generationPolicy = generationPolicy;
     }
 
     public ToolResult search(String query) {
@@ -207,94 +211,15 @@ public class WebSearchTool {
                 );
             }
 
-            String prompt = """
-                    You are an enterprise web-search answer generator.
-
-                    Answer the user's question using ONLY the supplied
-                    web search results.
-
-                    STRICT RULES:
-
-                    1. Use only facts supported by the supplied search
-                       results.
-
-                    2. Prefer official, primary, and authoritative sources
-                       when available.
-
-                    3. Each result includes a "Search result date" field.
-                       Use it when provided as evidence of the date
-                       displayed by the search engine.
-
-                       This date may be relative, such as "2 days ago".
-                       It may represent a publication date and does not
-                       necessarily represent the page's last-updated time.
-
-                    4. For questions asking for current information,
-                       prefer recent, relevant, dated results.
-
-                       Do not assume an undated result is current merely
-                       because it appears in the search results.
-
-                    5. For questions about current weather, distinguish
-                       the observation time from the time the article
-                       or webpage was published.
-
-                       Do not present an old weather observation as
-                       current weather.
-
-                    6. If sources provide conflicting information,
-                       compare their dates and observation times when
-                       available.
-
-                       Briefly explain meaningful conflicts. Do not
-                       choose an answer simply because more sources
-                       repeat it.
-
-                    7. If the results do not establish a reliable current
-                       answer, clearly say that the available results
-                       are insufficient. Do not guess.
-
-                    8. Distinguish different concepts when necessary.
-                       For example, the latest software release and
-                       the latest LTS release may be different.
-
-                    9. Do not invent facts, dates, versions, measurements,
-                       observation times, or explanations.
-
-                    10. If the supplied results cannot answer the
-                        question, clearly say that there is not enough
-                        information.
-
-                    11. Keep the answer concise but complete.
-
-                    12. Do not leave the answer unfinished.
-
-                    13. Do not include source URLs in the answer.
-                        URLs are returned separately in the API response.
-
-                    14. Do not repeat the entire search results.
-
-                    15. For current information such as weather, clearly
-                        mention the relevant observation time or date
-                        when it is available in the search results.
-
-                    USER QUESTION:
-                    %s
-
-                    SEARCH RESULTS:
-                    %s
-
-                    Produce a concise, complete answer using ONLY
-                    the supplied search results.
-                    """.formatted(
-                    query,
-                    searchContext
-            );
+            AnswerPrompt prompt = AnswerPrompt.build(
+                    AnswerPrompt.Task.WEB, query, searchContext.toString());
 
             String answer =
                     chatClient
                             .prompt()
-                            .user(prompt)
+                            .system(prompt.system())
+                            .user(prompt.user())
+                            .options(generationPolicy.answer())
                             .call()
                             .content();
 
@@ -312,10 +237,12 @@ public class WebSearchTool {
             return new ToolResult(
                     "WEB_SEARCH",
                     true,
-                    answer.trim(),
+                    prompt.format(answer),
                     results
             );
 
+        } catch (com.abhinav.agentic_ai_chatbot.exception.AnswerFormatException e) {
+            return new ToolResult("WEB_SEARCH", false, e.getMessage(), new ArrayList<>());
         } catch (Exception e) {
 
             return new ToolResult(
